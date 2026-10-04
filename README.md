@@ -49,6 +49,15 @@ records it in `<id>/update.json` on the `updates` branch, which is what installe
 apps poll. A stable release never drops the nightly entry. The check workflow
 builds every transport with a throwaway key on each push.
 
+### Without a signing secret
+
+The release workflow needs the repository secret `SIGNING_KEY`. Without it
+(the OpenFlux root key is deliberately not stored in GitHub) a release is made by
+the key holder: build with `scripts/build.sh <id> <key>`, create the GitHub release
+with the `.flux` asset, and write `<id>/update.json` on the `updates` branch with
+`scriptsign index` (the workflow's last step shows the exact command). The tag
+still triggers the workflow; it notices there is no key and does nothing.
+
 ## Keys
 
 Apps trust a transport as "official" if it verifies under one of the keys in the

@@ -37,7 +37,20 @@ jobs:
           case "$version" in *-*) channel=nightly; pre=--prerelease;; *) channel=stable; pre=;; esac
           { echo "ID=$id"; echo "VERSION=$version"; echo "CHANNEL=$channel"; echo "PRERELEASE=$pre"; } >> "$GITHUB_ENV"
 
+      - name: Is there a signing key here?
+        id: key
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+        run: |
+          if [ -n "$SIGNING_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No SIGNING_KEY secret: this release was published by hand with a package signed on the key holder's machine (see README)."
+          fi
+
       - name: Pack and sign
+        if: steps.key.outputs.present == 'true'
         env:
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
           OPENFLUX_REF: ${{ vars.OPENFLUX_REF || 'nightly' }}
@@ -48,12 +61,14 @@ jobs:
           rm -f /tmp/signing.key
 
       - name: Publish the release
+        if: steps.key.outputs.present == 'true'
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           gh release create "$GITHUB_REF_NAME" "dist/${ID}-${VERSION}.flux" $PRERELEASE \
             --title "${ID} ${VERSION}" --generate-notes
 
       - name: Update ${{ env.ID }}/update.json on the `updates` branch
+        if: steps.key.outputs.present == 'true'
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           notes="$(gh release view "$GITHUB_REF_NAME" --json body -q .body | head -c 2000)"
