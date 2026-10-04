@@ -1,0 +1,36 @@
+# Every push and PR: each transport must bundle, pack and verify (a throwaway
+# key), so a manifest that disagrees with the script, or a script that does not
+# even load, fails here and not on a user's device.
+name: Check
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with: { go-version: stable }
+      - name: Build every transport with a throwaway key
+        run: |
+          go install github.com/p1neappleXpress/OpenFlux/transport/script/cmd/scriptsign@${{ vars.OPENFLUX_REF || 'nightly' }}
+          scriptsign genkey /tmp/t.priv /tmp/t.pub >/dev/null
+          for d in transports/*/; do
+            id=$(basename "$d")
+            scripts/build.sh "$id" /tmp/t.priv dist
+            scriptsign verify /tmp/t.pub "dist/$id-$(jq -r .version "$d/manifest.json").flux"
+          done
+      - name: The catalog lists every transport, and only transports that exist
+        run: |
+          for d in transports/*/; do
+            jq -e --arg id "$(basename "$d")" '.transports[] | select(.id == $id)' index.json >/dev/null || { echo "index.json misses $d"; exit 1; }
+          done
+          for id in $(jq -r '.transports[].id' index.json); do
+            [ -d "transports/$id" ] || { echo "index.json lists $id, which has no directory"; exit 1; }
+          done

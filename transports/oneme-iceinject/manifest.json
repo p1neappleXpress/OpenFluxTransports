@@ -1,0 +1,12 @@
+{
+  "id": "oneme-iceinject",
+  "name": "oneme-iceinject",
+  "version": "1.1.0",
+  "author": "OpenFlux",
+  "description": "MAX (OneMe): packets ride the call signaling channel (the path the native transport uses).",
+  "wire": 1,
+  "api": 1,
+  "update": [
+    "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/oneme-iceinject/update.json"
+  ]
+}

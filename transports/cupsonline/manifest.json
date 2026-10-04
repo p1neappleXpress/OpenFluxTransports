@@ -1,0 +1,12 @@
+{
+  "id": "cupsonline",
+  "name": "cupsonline",
+  "version": "1.1.0",
+  "author": "OpenFlux",
+  "description": "cups.online: packets ride cursor integers in shared-editor rooms.",
+  "wire": 1,
+  "api": 1,
+  "update": [
+    "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/cupsonline/update.json"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "id": "mailru",
+  "name": "mailru",
+  "version": "1.1.0",
+  "author": "OpenFlux",
+  "description": "Mail.ru Docs: packets ride the cursor field of a public document's co-editing session.",
+  "wire": 1,
+  "api": 1,
+  "update": [
+    "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/mailru/update.json"
+  ]
+}

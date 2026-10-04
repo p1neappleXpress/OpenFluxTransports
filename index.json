@@ -1,0 +1,47 @@
+{
+  "format": 1,
+  "transports": [
+    {
+      "id": "yandex",
+      "name": "yandex",
+      "description": "Yandex Docs: packets ride the cursor field of a document's co-editing session.",
+      "update": "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/yandex/update.json"
+    },
+    {
+      "id": "vyandex",
+      "name": "vyandex",
+      "description": "Yandex Volga: packets ride a Volga document session (HTTP relay up, push socket down).",
+      "update": "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/vyandex/update.json"
+    },
+    {
+      "id": "boards",
+      "name": "boards",
+      "description": "Yandex Boards: packets ride text objects on a shared whiteboard.",
+      "update": "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/boards/update.json"
+    },
+    {
+      "id": "mailru",
+      "name": "mailru",
+      "description": "Mail.ru Docs: packets ride the cursor field of a public document's co-editing session.",
+      "update": "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/mailru/update.json"
+    },
+    {
+      "id": "cupsonline",
+      "name": "cupsonline",
+      "description": "cups.online: packets ride cursor integers in shared-editor rooms.",
+      "update": "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/cupsonline/update.json"
+    },
+    {
+      "id": "oneme-iceinject",
+      "name": "oneme-iceinject",
+      "description": "MAX (OneMe): packets ride the call signaling channel (the path the native transport uses).",
+      "update": "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/oneme-iceinject/update.json"
+    },
+    {
+      "id": "oneme-webrtc",
+      "name": "oneme-webrtc",
+      "description": "MAX (OneMe): packets ride a WebRTC data channel.",
+      "update": "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/oneme-webrtc/update.json"
+    }
+  ]
+}

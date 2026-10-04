@@ -1,0 +1,72 @@
+# Push a tag  <id>-v<version>  to release that one transport:
+#     yandex-v1.2.0          -> channel "stable"
+#     yandex-v1.3.0-beta.1   -> channel "nightly" (a GitHub pre-release)
+#
+# The signed <id>-<version>.flux is a release asset; the update.json the apps
+# poll is committed to the `updates` branch as <id>/update.json, one entry per
+# channel, so a stable release never drops the nightly entry.
+#
+# One-time setup: the OpenFlux release key (a one-line hex file from
+# `scriptsign genkey`, the public half of which is OfficialKeyHex in the core)
+# as the repository secret SIGNING_KEY. Rotation: see OpenFlux's
+# docs/scripted-transports.md ("Official keys").
+name: Release
+on:
+  push:
+    tags: ["*-v[0-9]*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with: { go-version: stable }
+
+      - name: Which transport, which version, which channel
+        run: |
+          tag="$GITHUB_REF_NAME"
+          id="${tag%-v[0-9]*}"
+          version="${tag##"$id"-v}"
+          [ -d "transports/$id" ] || { echo "no transport $id for tag $tag"; exit 1; }
+          have="$(jq -r .version "transports/$id/manifest.json")"
+          [ "$version" = "$have" ] || { echo "tag version $version != manifest.json $have"; exit 1; }
+          case "$version" in *-*) channel=nightly; pre=--prerelease;; *) channel=stable; pre=;; esac
+          { echo "ID=$id"; echo "VERSION=$version"; echo "CHANNEL=$channel"; echo "PRERELEASE=$pre"; } >> "$GITHUB_ENV"
+
+      - name: Pack and sign
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          OPENFLUX_REF: ${{ vars.OPENFLUX_REF || 'nightly' }}
+        run: |
+          [ -n "$SIGNING_KEY" ] || { echo "secret SIGNING_KEY is not set"; exit 1; }
+          umask 077; printf '%s\n' "$SIGNING_KEY" > /tmp/signing.key
+          scripts/build.sh "$ID" /tmp/signing.key dist
+          rm -f /tmp/signing.key
+
+      - name: Publish the release
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          gh release create "$GITHUB_REF_NAME" "dist/${ID}-${VERSION}.flux" $PRERELEASE \
+            --title "${ID} ${VERSION}" --generate-notes
+
+      - name: Update ${{ env.ID }}/update.json on the `updates` branch
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          notes="$(gh release view "$GITHUB_REF_NAME" --json body -q .body | head -c 2000)"
+          repo="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git ls-remote --exit-code --heads "$repo" updates >/dev/null 2>&1; then
+            git clone -q --branch updates --depth 1 "$repo" /tmp/updates
+          else
+            git init -q -b updates /tmp/updates && git -C /tmp/updates remote add origin "$repo"
+          fi
+          mkdir -p "/tmp/updates/$ID"
+          scriptsign index -channel="$CHANNEL" \
+            -url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${ID}-${VERSION}.flux" \
+            -notes="$notes" "/tmp/updates/$ID/update.json" "dist/${ID}-${VERSION}.flux"
+          cd /tmp/updates
+          git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
+          git add "$ID/update.json" && git commit -qm "${ID} ${VERSION} on ${CHANNEL}" && git push -q origin updates
