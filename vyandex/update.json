@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "id": "vyandex",
+  "channels": {
+    "stable": {
+      "version": "1.1.0",
+      "wire": 1,
+      "api": 1,
+      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/vyandex-v1.1.0/vyandex-1.1.0.flux",
+      "sha256": "98febe3eb6ce988b02b8267f5e029b8c61939551ff859981e045f451f0babfa5",
+      "notes": "First release in this repository: the transport as kept in step with the native one in OpenFlux (saveChanges stream, boards modify-objects, cupsonline per-sender reassembly and exit rooms, a login wall reaching the app, an engine that closes the script on stop). Parity audit: https://github.com/p1neappleXpress/OpenFlux/blob/nightly/docs/plans/2026-10-04-native-js-parity.md"
+    }
+  }
+}

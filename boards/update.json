@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "id": "boards",
+  "channels": {
+    "stable": {
+      "version": "1.1.0",
+      "wire": 1,
+      "api": 1,
+      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/boards-v1.1.0/boards-1.1.0.flux",
+      "sha256": "7c687bca83ad1d9aa5154081e385c55a1d10af91d444f038f6bbb018de5260f4",
+      "notes": "First release in this repository: the transport as kept in step with the native one in OpenFlux (saveChanges stream, boards modify-objects, cupsonline per-sender reassembly and exit rooms, a login wall reaching the app, an engine that closes the script on stop). Parity audit: https://github.com/p1neappleXpress/OpenFlux/blob/nightly/docs/plans/2026-10-04-native-js-parity.md"
+    }
+  }
+}
