@@ -17,6 +17,8 @@ is the source and the release pipeline; to write a transport of your own, fork
 | `cupsonline` | cursor integers in cups.online rooms (an exit can create its rooms) |
 | `oneme-iceinject` | MAX call signaling (the path the native transport uses) |
 | `oneme-webrtc` | a MAX WebRTC data channel |
+| `mtslink` | cursor position updates on an MTS-Link whiteboard (by trader52) |
+| `bitrix` | cursor position updates on a Bitrix24 Flipchart whiteboard (by trader52) |
 
 ## Layout
 

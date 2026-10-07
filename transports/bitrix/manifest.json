@@ -1,0 +1,12 @@
+{
+  "id": "bitrix",
+  "name": "bitrix",
+  "version": "1.0.0",
+  "author": "OpenFlux",
+  "description": "Bitrix24 Flipchart: packets ride cursor position updates on a shared whiteboard.",
+  "wire": 1,
+  "api": 1,
+  "update": [
+    "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/bitrix/update.json"
+  ]
+}

@@ -42,6 +42,18 @@
       "name": "oneme-webrtc",
       "description": "MAX (OneMe): packets ride a WebRTC data channel.",
       "update": "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/oneme-webrtc/update.json"
+    },
+    {
+      "id": "mtslink",
+      "name": "mtslink",
+      "description": "MTS-Link: packets ride cursor position updates on a shared whiteboard.",
+      "update": "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/mtslink/update.json"
+    },
+    {
+      "id": "bitrix",
+      "name": "bitrix",
+      "description": "Bitrix24 Flipchart: packets ride cursor position updates on a shared whiteboard.",
+      "update": "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/bitrix/update.json"
     }
   ]
 }
