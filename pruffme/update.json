@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "id": "pruffme",
+  "channels": {
+    "stable": {
+      "version": "1.0.0",
+      "wire": 1,
+      "api": 1,
+      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/pruffme-v1.0.0/pruffme-1.0.0.flux",
+      "sha256": "4208936d124658bbc1b98b6836106eaceaf945b688ed694fee965bd22b871e7e",
+      "notes": "pruffme 1.0.0: first release. Packets ride cursor (notify-position) broadcasts on a shared PRUFFME whiteboard, so nothing is stored on the board. Measured on a live board with two clients: 300 packets/s at 33 ms and no loss, about 400-470 packets/s (540-650 KB/s) at the limit, 1 MB packets whole, 150 s of silence without a heartbeat. The board must have \"anyone with the link can edit\" turned on."
+    }
+  }
+}
