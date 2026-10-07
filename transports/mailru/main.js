@@ -46,6 +46,9 @@ var activityTimer = null;
 var docInfo = null; // the live session's fetchDocInfo result (editor user id for saveChanges)
 var connectGen = 0; // bumped by every connectToDoc: a stale attempt closes what it opened
 var reconnectTimer = null; // at most one reconnect pending
+var HANDSHAKE_TIMEOUT_MS = 15000;
+var hsStage = ""; // "open" (waiting for 0{...}), "connect" (waiting for 40{...}), "done"
+var hsTimer = null;
 
 function pad(n, width) {
   var s = String(n);
@@ -177,7 +180,7 @@ async function fetchDocInfo(link) {
 function startKeepAlive() {
   if (keepAliveTimer) clearInterval(keepAliveTimer);
   keepAliveTimer = setInterval(function () {
-    if (!sock) return;
+    if (!sock || hsStage !== "done") return; // nothing goes out before the handshake is done
     try {
       sock.send('42["message",{"type":"cursor","cursor":"18;---KA---"}]');
     } catch (e) {
@@ -191,6 +194,15 @@ function startKeepAlive() {
   }, KEEPALIVE_MS);
 }
 
+// canEdit says whether the link this session joined with may edit the document: the server
+// reports it in the document's permissions. A link without edit rights ("edit": false, what
+// most public links are) gets its connection closed (no close frame) on the first saveChanges,
+// every 0.5 to 5 seconds, so the stream is not sent there. A document that does not say is
+// treated as editable, as before. Same as canEdit in mailru.go.
+function canEdit(permissions) {
+  return !permissions || typeof permissions.edit !== "boolean" || permissions.edit;
+}
+
 // editorActivityLoop: sends a saveChanges message at a random interval in
 // [0.5 s, 5 s] so the stream looks like a live person editing. Skipped while
 // there is no session (mid-reconnect), exactly like the native loop.
@@ -199,7 +211,7 @@ function startEditorActivity() {
   var tick = function () {
     activityTimer = null;
     if (!running) return;
-    if (sock && docInfo) {
+    if (sock && docInfo && hsStage === "done" && canEdit(docInfo.permissions)) {
       try {
         sock.send(buildSaveChanges(docInfo.editorUserId || userID));
       } catch (e) {
@@ -222,6 +234,30 @@ function handleMessage(text) {
     return;
   }
   if (text === "3") return;
+
+  // The Engine.IO / Socket.IO handshake, in the order the server needs it: its open frame 0{...},
+  // our 40{token}, its 40{sid}, and only then the editor auth (same as waitMailruSocketIO in
+  // mailru.go). Whatever else it says meanwhile is ignored.
+  if (hsStage === "open") {
+    if (text.indexOf("0{") === 0 && sock && docInfo) {
+      hsStage = "connect";
+      try {
+        sock.send('40{"token":"' + docInfo.token + '"}');
+      } catch (e) {}
+    }
+    return;
+  }
+  if (hsStage === "connect") {
+    if (text.indexOf("40") === 0 && sock && docInfo) {
+      hsStage = "done";
+      if (hsTimer) {
+        clearTimeout(hsTimer);
+        hsTimer = null;
+      }
+      sendAuth(docInfo);
+    }
+    return;
+  }
 
   if (text.indexOf('"type":"auth"') !== -1 && text.indexOf('"result":1') !== -1) {
     return; // auth ack - fire-and-forget, same as the native transport
@@ -247,6 +283,11 @@ function handleMessage(text) {
 function onSocketClose(attempt) {
   sock = null;
   docInfo = null;
+  hsStage = "";
+  if (hsTimer) {
+    clearTimeout(hsTimer);
+    hsTimer = null;
+  }
   var next = attempt;
   // A connection that had been up for >15s gets the fast (attempt=1)
   // backoff on its next try instead of continuing to climb - identical to
@@ -289,49 +330,19 @@ function connectToDoc(attempt) {
         onSocketClose(attempt);
       };
 
-      // Auth fires immediately, same as the native transport: Mail.ru's
-      // coauthoring server buffers these until its own session state
-      // catches up, and waiting for an explicit ack here only stretches
-      // the outage window on every reconnect.
-      sock.send('40{"token":"' + info.token + '"}');
-
-      var authMsg = {
-        type: "auth",
-        docid: info.docKey,
-        documentCallbackUrl: info.callbackUrl,
-        token: "fghhfgsjdgfjs",
-        user: { id: info.editorUserId, username: userID, indexUser: -1 },
-        editorType: 0,
-        lastOtherSaveTime: -1,
-        block: [],
-        documentFormatSave: 65,
-        view: false,
-        isCloseCoAuthoring: false,
-        openCmd: {
-          c: "open",
-          id: info.docKey,
-          userid: info.editorUserId,
-          format: info.fileType,
-          url: info.docUrl,
-          title: info.docTitle,
-          lcid: 25,
-          nobase64: true,
-          convertToOrigin: ".pdf.xps.oxps.djvu",
-        },
-        lang: "ru",
-        mode: "edit",
-        permissions: info.permissions,
-        IsAnonymousUser: false,
-        timezoneOffset: -180,
-        coEditingMode: "fast",
-        jwtOpen: info.token,
-        time: 1000,
-        supportAuthChangesAck: true,
-      };
-      sock.send('42' + JSON.stringify(["message", authMsg]));
-
-      connectedAt = Date.now();
-      setState("connected");
+      // The auth waits for the server's handshake (see handleMessage); if it never comes, the
+      // socket is dropped and the usual reconnect takes over.
+      hsStage = "open";
+      if (hsTimer) clearTimeout(hsTimer);
+      hsTimer = setTimeout(function () {
+        hsTimer = null;
+        if (sock === newSock && hsStage !== "done") {
+          setState("reconnecting", "Socket.IO handshake timed out");
+          try {
+            newSock.close();
+          } catch (e) {}
+        }
+      }, HANDSHAKE_TIMEOUT_MS);
     } catch (e) {
       setState("reconnecting", String(e));
       scheduleReconnect(attempt);
@@ -339,11 +350,52 @@ function connectToDoc(attempt) {
   })();
 }
 
+// sendAuth is the editor auth, sent once the handshake is done; the transport is up from here.
+function sendAuth(info) {
+  var authMsg = {
+    type: "auth",
+    docid: info.docKey,
+    documentCallbackUrl: info.callbackUrl,
+    token: "fghhfgsjdgfjs",
+    user: { id: info.editorUserId, username: userID, indexUser: -1 },
+    editorType: 0,
+    lastOtherSaveTime: -1,
+    block: [],
+    documentFormatSave: 65,
+    view: false,
+    isCloseCoAuthoring: false,
+    openCmd: {
+      c: "open",
+      id: info.docKey,
+      userid: info.editorUserId,
+      format: info.fileType,
+      url: info.docUrl,
+      title: info.docTitle,
+      lcid: 25,
+      nobase64: true,
+      convertToOrigin: ".pdf.xps.oxps.djvu",
+    },
+    lang: "ru",
+    mode: "edit",
+    permissions: info.permissions,
+    IsAnonymousUser: false,
+    timezoneOffset: -180,
+    coEditingMode: "fast",
+    jwtOpen: info.token,
+    time: 1000,
+    supportAuthChangesAck: true,
+  };
+  sock.send("42" + JSON.stringify(["message", authMsg]));
+
+  connectedAt = Date.now();
+  setState("connected");
+}
+
 var Transport = {
   info: function () {
     return {
       name: "mailru",
-      version: "1.1.0",
+      version: "1.1.1",
       cookieDomain: "https://cloud.mail.ru/",
       mtu: 0, // unbounded - native mailru never fragments either
       reliable: false,

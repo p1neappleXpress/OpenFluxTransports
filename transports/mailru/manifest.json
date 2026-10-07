@@ -1,7 +1,7 @@
 {
   "id": "mailru",
   "name": "mailru",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "author": "OpenFlux",
   "description": "Mail.ru Docs: packets ride the cursor field of a public document's co-editing session.",
   "wire": 1,
