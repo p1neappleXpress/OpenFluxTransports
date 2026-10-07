@@ -3,12 +3,12 @@
   "id": "mailru",
   "channels": {
     "stable": {
-      "version": "1.1.0",
+      "version": "1.1.1",
       "wire": 1,
       "api": 1,
-      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/mailru-v1.1.0/mailru-1.1.0.flux",
-      "sha256": "819facb5adfa63b4c540b2200318f2dd195a35cbc3bbaae780e9efb0df9f44bd",
-      "notes": "First release in this repository: the transport as kept in step with the native one in OpenFlux (saveChanges stream, boards modify-objects, cupsonline per-sender reassembly and exit rooms, a login wall reaching the app, an engine that closes the script on stop). Parity audit: https://github.com/p1neappleXpress/OpenFlux/blob/nightly/docs/plans/2026-10-04-native-js-parity.md"
+      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/mailru-v1.1.1/mailru-1.1.1.flux",
+      "sha256": "0a2c447a3b2a164fcd317824cff500c242d1194b134070e49661906c1cfe8b15",
+      "notes": "mailru 1.1.1: a link without edit rights no longer drops the connection every few seconds (saveChanges is not sent where editing is forbidden), and the editor auth waits for the Engine.IO / Socket.IO handshake. Same two changes as OpenFlux core 0.4.2."
     }
   }
 }
