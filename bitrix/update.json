@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "id": "bitrix",
+  "channels": {
+    "stable": {
+      "version": "1.0.0",
+      "wire": 1,
+      "api": 1,
+      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/bitrix-v1.0.0/bitrix-1.0.0.flux",
+      "sha256": "8c83e3562bd366994385ba70dbaa53d1bb019fbb8ef3efaf7634ab2904a01c49",
+      "notes": "bitrix 1.0.0: first release as a signed JS package (the OpenFlux release key). Contributed by trader52."
+    }
+  }
+}

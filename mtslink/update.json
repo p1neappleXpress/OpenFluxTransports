@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "id": "mtslink",
+  "channels": {
+    "stable": {
+      "version": "1.0.0",
+      "wire": 1,
+      "api": 1,
+      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/mtslink-v1.0.0/mtslink-1.0.0.flux",
+      "sha256": "a68315d73e97dd74c137285debe635e9ba46d1e194416beb5eb9c412d6f46b79",
+      "notes": "mtslink 1.0.0: first release as a signed JS package (the OpenFlux release key). Contributed by trader52."
+    }
+  }
+}
