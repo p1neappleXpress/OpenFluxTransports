@@ -19,6 +19,7 @@ is the source and the release pipeline; to write a transport of your own, fork
 | `oneme-webrtc` | a MAX WebRTC data channel |
 | `mtslink` | cursor position updates on an MTS-Link whiteboard (by trader52) |
 | `bitrix` | cursor position updates on a Bitrix24 Flipchart whiteboard (by trader52) |
+| `pruffme` | cursor position updates on a PRUFFME whiteboard (no cells left on the board) |
 
 ## Layout
 

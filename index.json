@@ -54,6 +54,12 @@
       "name": "bitrix",
       "description": "Bitrix24 Flipchart: packets ride cursor position updates on a shared whiteboard.",
       "update": "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/bitrix/update.json"
+    },
+    {
+      "id": "pruffme",
+      "name": "pruffme",
+      "description": "PRUFFME: packets ride cursor position updates on a shared whiteboard.",
+      "update": "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/pruffme/update.json"
     }
   ]
 }

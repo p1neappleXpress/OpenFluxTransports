@@ -1,0 +1,12 @@
+{
+  "id": "pruffme",
+  "name": "pruffme",
+  "version": "1.0.0",
+  "author": "OpenFlux",
+  "description": "PRUFFME: packets ride cursor position updates on a shared whiteboard.",
+  "wire": 1,
+  "api": 1,
+  "update": [
+    "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/pruffme/update.json"
+  ]
+}
