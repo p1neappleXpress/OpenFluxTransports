@@ -463,7 +463,9 @@ var WIZARD_LABELS = {
   sockets: "Список серверов",
   login: "Вход гостем",
   socket: "Соединение с сервером",
-  subscribe: "Подписка на доску"
+  subscribe: "Подписка на доску",
+  session: "Сессия",
+  cabinet: "Кабинет"
 };
 
 var WIZARD_CFG = {
@@ -503,6 +505,17 @@ var WIZARD_CFG = {
     desc: "Как клиент и нода будут связываться через доску.",
     onlyClient: "Нода уже работает на этой доске: настроить только клиента",
     note: "На одной доске работает одна пара. Вторую ноду на ту же доску не ставьте: пакеты смешаются."
+  },
+  // Account sign-in: pruffme has no public "who am I" path, so the window ends by the address matching the cabinet
+  // (or the «Это она» button) and hands the script the session; /api/account then checks it.
+  account: {
+    desc: "Войдите в свой аккаунт PRUFFME — окно закроется, когда откроется кабинет. Так мастер сможет создать доску от вашего имени.",
+    button: "Войти в PRUFFME",
+    waiting: "Войдите в PRUFFME в открывшемся окне…",
+    url: "https://pruffme.com/",
+    loginTitle: "PRUFFME",
+    match: "^https://(www\\.)?pruffme\\.com/cabinet",
+    hint: "Войдите в аккаунт — окно закроется, когда откроется кабинет (или нажмите «Это она»)"
   },
   options: []
 };
@@ -621,7 +634,40 @@ function explainFailure(e) {
   if (e.step === "board") return "По этой ссылке нет доски PRUFFME: проверьте адрес и что доску не удалили";
   if (e.step === "login") return "PRUFFME не пустил гостя на доску" + st;
   if (e.step === "subscribe") return "Доска не ответила на вход гостя: проверьте, что доступ по ссылке включён";
+  if (e.step === "session") return "Окно входа не вернуло сессию PRUFFME: войдите заново";
+  if (e.step === "cabinet") return "Не удалось открыть кабинет PRUFFME этой сессией" + st;
   return "";
+}
+
+// accountRoute takes the session a sign-in window caught (cfg.account) and checks it: it never logs a cookie value,
+// only the cookie NAMES and the cabinet's status. Later it will create a board from this session and return its url.
+async function accountRoute(body, rep) {
+  var cap = body && body.capture;
+  if (typeof cap === "string") cap = wizard.parse(cap);
+  if (!cap || !cap.cookie) throw new wizard.StepError("session", "окно входа не вернуло сессию");
+  var names = String(cap.cookie).split(";").map(function (c) { return c.trim().split("=")[0]; }).filter(Boolean);
+  rep("session", true, names.length + " cookies");
+
+  var res = await wizard.send("cabinet", {
+    url: "https://" + PRUFFME_BASE + "/cabinet/",
+    method: "GET",
+    headers: { "User-Agent": cap.ua || UA, "Cookie": cap.cookie, "Accept": "text/html,application/xhtml+xml" }
+  });
+  // The logged-out /cabinet/ is the login shell (~18 KB, only the "cabinet-v2" CSS class); a signed-in cabinet carries
+  // the user's own widgets. So these markers - all absent when logged out - are the signal, and the size is reported
+  // so a real sign-in on the phone can sharpen this.
+  var html = String(res.body || "");
+  var len = html.length;
+  var signedIn = res.status === 200 && /getUserPermissions|pruffme_notifications_button|Выйти|["'>/]logout/i.test(html);
+  rep("cabinet", true, "HTTP " + res.status + ", " + len + " B" + (signedIn ? " · вход виден" : ""));
+  return {
+    title: signedIn ? "Вход выполнен" : "Сессия получена",
+    lines: [
+      "Куки (" + names.length + "): " + names.join(", ").slice(0, 160),
+      "Кабинет: HTTP " + res.status + ", " + len + " байт" + (signedIn ? " — вход виден" : "")
+    ],
+    warn: signedIn ? "" : "Признаков входа в кабинете не вижу — если вход прошёл, пришлите этот размер, уточню проверку"
+  };
 }
 
 function startWizard(values) {
@@ -634,7 +680,8 @@ function startWizard(values) {
     reason: "Подключение через PRUFFME",
     cfg: WIZARD_CFG,
     values: { url: String((values && values.url) || "") },
-    check: checkBoard
+    check: checkBoard,
+    routes: { "/api/account": accountRoute }
   });
 }
 
@@ -651,7 +698,7 @@ var Transport = {
   info: function () {
     return {
       name: "pruffme",
-      version: "1.1.0",
+      version: "1.2.0",
       cookieDomain: "",
       mtu: 0,
       reliable: false,

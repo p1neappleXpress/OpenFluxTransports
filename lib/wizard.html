@@ -189,6 +189,12 @@ input:focus { border-color: var(--accent); }
         <button type="button" id="segHave" class="on"></button>
       </div>
       <div id="newBox" style="display:none">
+        <div id="accountBox" style="display:none;margin-bottom:16px">
+          <p class="desc" id="accountDesc"></p>
+          <button class="btn-service" id="accountBtn"></button>
+          <div id="accountStatus" style="margin-top:12px"></div>
+          <div id="accountReport"></div>
+        </div>
         <p class="desc" id="createDesc"></p>
         <button class="btn-service" id="createBtn"></button>
         <div id="createStatus" style="margin-top:12px"></div>
@@ -469,6 +475,45 @@ $("createBtn").onclick = function () {
   }).catch(function (e) {
     $("createBtn").disabled = false;
     $("createStatus").innerHTML = badge("err", esc((e && e.message) || String(e)));
+  });
+};
+
+// Optional account sign-in (cfg.account): a sign-in window hands the script the site's session (cookies), which the
+// transport's /api/account route uses to make the link (e.g. create a board) and/or report what the session can do.
+// Only when the app can open a sign-in window.
+var ACCOUNT = CFG.account || null;
+var canAccount = !!(ACCOUNT && typeof window.openfluxLogin === "function");
+if (canAccount) {
+  $("accountBox").style.display = "block";
+  $("accountBtn").textContent = ACCOUNT.button || ("Войти в " + SERVICE);
+  if (ACCOUNT.desc) { $("accountDesc").textContent = ACCOUNT.desc; } else { $("accountDesc").style.display = "none"; }
+}
+
+if (canAccount) $("accountBtn").onclick = function () {
+  resetCheck();
+  $("accountBtn").disabled = true;
+  $("accountReport").innerHTML = "";
+  $("accountStatus").innerHTML = badge("wait", SPIN + (ACCOUNT.waiting || "Войдите в открывшемся окне…"));
+  window.openfluxLogin({
+    url: ACCOUNT.url,
+    title: ACCOUNT.loginTitle || SERVICE,
+    capture: { cookies: true, page: { match: ACCOUNT.match || "", hint: ACCOUNT.hint || "" } }
+  }).then(function (stored) {
+    $("accountStatus").innerHTML = badge("wait", SPIN + "Проверяю вход…");
+    return api("account", { capture: stored });
+  }).then(function (r) {
+    $("accountBtn").disabled = false;
+    if (r && r.ok) {
+      $("accountStatus").innerHTML = badge("ok", esc(r.title || "Вход выполнен")) + (r.warn ? ' ' + badge("warn", esc(r.warn)) : "");
+      $("accountReport").innerHTML = (r.lines && r.lines.length ? infoHTML(r) : "") + reportHTML(r.steps, false);
+      if (r.url) { $("linkUrl").value = r.url; $("copyBtn").style.display = ""; setSeg("have"); runCheck(); }
+    } else {
+      $("accountStatus").innerHTML = badge("err", esc((r && r.error) || "Не удалось войти"));
+      $("accountReport").innerHTML = reportHTML(r && r.steps, true);
+    }
+  }).catch(function (e) {
+    $("accountBtn").disabled = false;
+    $("accountStatus").innerHTML = badge("err", esc((e && e.message) || String(e)));
   });
 };
 
