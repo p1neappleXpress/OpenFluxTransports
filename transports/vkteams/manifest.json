@@ -1,0 +1,12 @@
+{
+  "id": "vkteams",
+  "name": "vkteams",
+  "version": "1.0.0",
+  "author": "OpenFlux",
+  "description": "VK Teams Calls: packets ride a WebRTC data channel over VK Teams call room.",
+  "wire": 1,
+  "api": 1,
+  "update": [
+    "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/vkteams/update.json"
+  ]
+}

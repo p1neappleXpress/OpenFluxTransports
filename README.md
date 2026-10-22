@@ -20,6 +20,8 @@ is the source and the release pipeline; to write a transport of your own, fork
 | `mtslink` | cursor position updates on an MTS-Link whiteboard (by trader52) |
 | `bitrix` | cursor position updates on a Bitrix24 Flipchart whiteboard (by trader52) |
 | `pruffme` | cursor position updates on a PRUFFME whiteboard (no cells left on the board) |
+| `mtslink-webrtc` | a WebRTC data channel between two guests of an MTS-Link meeting, signaling and fallback through the meeting chat (by trader52) |
+| `vkteams` | a WebRTC data channel in a VK Teams call, signaling through the call's custom-data messages (by trader52) |
 
 ## Layout
 

@@ -60,6 +60,18 @@
       "name": "pruffme",
       "description": "PRUFFME: packets ride cursor position updates on a shared whiteboard.",
       "update": "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/pruffme/update.json"
+    },
+    {
+      "id": "mtslink-webrtc",
+      "name": "mtslink-webrtc",
+      "description": "MTS-Link WebRTC: genuine P2P DataChannel tunnel through MTS-Link meetings with chat fallback.",
+      "update": "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/mtslink-webrtc/update.json"
+    },
+    {
+      "id": "vkteams",
+      "name": "vkteams",
+      "description": "VK Teams Calls: packets ride a WebRTC data channel over VK Teams call room.",
+      "update": "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/vkteams/update.json"
     }
   ]
 }
