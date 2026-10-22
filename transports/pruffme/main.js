@@ -61,6 +61,8 @@ var READ_DEADLINE_MS = 90000;
 var HANDSHAKE_WAIT_MS = 15000;
 var BOOTSTRAP_ATTEMPTS = 6; // transient failures while fetching the page / logging in
 
+var wizard = require("../../lib/wizard.js");
+
 var running = false;
 var landingURL = "";
 var boardHash = "";
@@ -222,18 +224,25 @@ function writeEventObj(ns, obj) {
   return id;
 }
 
+// subscribeEvent: the dashboard event that subscribes a participant to the board's slide.
+function subscribeEvent(session, who, slide, board) {
+  return {
+    action: "subscribe-slide-dashboard",
+    data: {
+      session: session,
+      dashboard: slide,
+      presentation: board,
+      properties: {},
+      participant: who.hash,
+      participant_team_role: -1,
+      options: { type: "landing", participant: who, intermediate: randHex(32) },
+    },
+  };
+}
+
 function sendSubscribe() {
   sessionId = randHex(32);
-  var data = {
-    session: sessionId,
-    dashboard: slideHash,
-    presentation: boardHash,
-    properties: {},
-    participant: participantHash,
-    participant_team_role: -1,
-    options: { type: "landing", participant: participant, intermediate: randHex(32) },
-  };
-  return writeEventObj("dashboard", { action: "subscribe-slide-dashboard", data: data });
+  return writeEventObj("dashboard", subscribeEvent(sessionId, participant, slideHash, boardHash));
 }
 
 // sendNotifyPosition: the packet as a cursor move, the format the original
@@ -441,11 +450,208 @@ async function connectAndServe(myGen) {
   setState("connected");
 }
 
+// ---- setup wizard ----
+//
+// Transport.setup (an app runs it while a node is being made) and open() without a link serve the wizard page on a
+// loopback port and ask the app to show it. The page checks the board here (/api/check) and hands back {client, node}
+// through window.openfluxSubmit; the answer for this side returns as cookiesApplied.
+
+var WIZARD_LABELS = {
+  link: "Ссылка",
+  page: "Страница доски",
+  board: "Данные доски",
+  sockets: "Список серверов",
+  login: "Вход гостем",
+  socket: "Соединение с сервером",
+  subscribe: "Подписка на доску"
+};
+
+var WIZARD_CFG = {
+  service: "PRUFFME",
+  title: "Подключение через PRUFFME",
+  tagline: "Мастер настройки туннеля через доску",
+  link: {
+    title: "Шаг 1: Доска",
+    desc: "Клиент и нода зайдут на одну доску PRUFFME гостями.",
+    label: "Ссылка на доску",
+    placeholder: "https://pruffme.com/landing/…",
+    check: "Проверить доску",
+    checking: "Проверяю доску…",
+    found: "Доска найдена",
+    summary: "Доска",
+    howTitle: "Где взять ссылку и что нужно знать",
+    how: [
+      "В PRUFFME создайте доску и включите для неё доступ «любой, у кого есть ссылка, может редактировать».",
+      "Скопируйте адрес страницы доски: <code>https://pruffme.com/landing/…</code>",
+      "Одна доска держит одну пару «клиент и нода». Для второй пары нужна вторая доска.",
+      "Проверка заходит на доску гостем так же, как туннель, и тут же уходит: ничего на доске не остаётся."
+    ]
+  },
+  create: {
+    tab: "Создать на сайте",
+    have: "Есть ссылка",
+    desc: "Откроется pruffme.com: войдите, создайте доску, включите доступ по ссылке и откройте её. Окно закроется само, когда откроется страница доски; если этого не случилось, нажмите «Это она».",
+    button: "Открыть PRUFFME",
+    waiting: "Создайте доску и откройте её в окне…",
+    url: "https://pruffme.com/",
+    title: "PRUFFME",
+    match: "^https://(www\\.)?pruffme\\.com/landing/[^/?#]+/[^/?#]+",
+    hint: "Создайте доску и откройте её страницу"
+  },
+  mode: {
+    title: "Шаг 2: Режим",
+    desc: "Как клиент и нода будут связываться через доску.",
+    onlyClient: "Нода уже работает на этой доске: настроить только клиента",
+    note: "На одной доске работает одна пара. Вторую ноду на ту же доску не ставьте: пакеты смешаются."
+  },
+  options: []
+};
+
+var wizardServer = null;
+
+// checkBoard walks the board the way the transport does (the page, the board's data, the login, one socket with the
+// subscription) and leaves again: it keeps nothing of the transport's own state, so it can run next to a live one.
+async function checkBoard(raw, rep) {
+  var link = String(raw || "").trim();
+  if (!/^https:\/\/[^\/\s]+\//i.test(link)) {
+    throw new wizard.StepError("link", "not an https address of a page");
+  }
+  rep("link", true, wizard.hostName(link));
+
+  var page = await wizard.send("page", {
+    url: link,
+    method: "GET",
+    headers: {
+      "User-Agent": UA,
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+    },
+  });
+  if (page.status !== 200) {
+    throw new wizard.StepError("page", "landing page HTTP " + page.status, page.status);
+  }
+  rep("page", true, "HTTP 200");
+
+  var board, slide;
+  try {
+    board = extractEmbedded(page.body);
+    slide = extractSlideHash(board);
+  } catch (e) {
+    throw new wizard.StepError("board", wizard.errText(e));
+  }
+  if (!board.hash) throw new wizard.StepError("board", "no board hash in the page");
+  if (!slide) throw new wizard.StepError("board", "no slide hash in the board's items");
+  rep("board", true, "board and slide found");
+
+  async function engine(step, action, content) {
+    var res = await wizard.send(step, {
+      url: "https://" + PRUFFME_BASE + "/engine/",
+      method: "POST",
+      headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded" },
+      body: "action=" + encodeURIComponent(action) +
+        "&content=" + encodeURIComponent(base64.encode(text.encode(JSON.stringify(content)))),
+    });
+    var data = wizard.parse(res.body);
+    if (res.status !== 200 || !data) throw new wizard.StepError(step, action + " HTTP " + res.status, res.status);
+    if (data.error) throw new wizard.StepError(step, action + " answered with an error", res.status);
+    return data;
+  }
+
+  var si = await engine("sockets", "sockets-info", {});
+  if (!si.socket_servers || si.socket_servers.length === 0) {
+    throw new wizard.StepError("sockets", "sockets-info returned no socket servers");
+  }
+  var server = si.socket_servers[Math.floor(Math.random() * si.socket_servers.length)];
+  var host = server.ip + ":" + (server.vport || SOCKET_PORT_DEFAULT);
+  rep("sockets", true, si.socket_servers.length + " servers");
+
+  var lm = await engine("login", "login-media", { media: board.hash, questions: [], utms: {}, devices: {} });
+  if (!lm.participant || !lm.participant.hash) {
+    throw new wizard.StepError("login", "login-media did not return a participant");
+  }
+  rep("login", true, "guest joined");
+
+  var s = await wizard.openSocket("socket", "wss://" + host + "/socket.io/?EIO=4&transport=websocket", {
+    "User-Agent": UA,
+    "Origin": "https://" + PRUFFME_BASE,
+  }, { readTimeoutMs: 20000 });
+  var n = 0;
+  var say = function (ns, obj) {
+    var id = n++;
+    s.send("42" + id + JSON.stringify([ns, obj]));
+    return id;
+  };
+  try {
+    var any = function () { return true; };
+    if ((await s.wait(any, 10000)) === null) throw new wizard.StepError("socket", "the server did not greet");
+    s.send("40");
+    if ((await s.wait(any, 10000)) === null) throw new wizard.StepError("socket", "the server did not accept the connection");
+    rep("socket", true, host);
+
+    say("im", { operation: "subscribe", user: null });
+    if ((await s.wait(function (m) { return m.indexOf('"subscribed"') !== -1; }, 10000)) === null) {
+      throw new wizard.StepError("subscribe", "no answer to the first subscription");
+    }
+    var ackId = say("dashboard", subscribeEvent(randHex(32), lm.participant, slide, board.hash));
+    var prefix = "43" + ackId + "[";
+    var ack = await s.wait(function (m) { return m.indexOf(prefix) === 0; }, HANDSHAKE_WAIT_MS);
+    if (ack === null) throw new wizard.StepError("subscribe", "no answer to the board's subscription");
+    var answer = wizard.parse(ack.slice(prefix.length - 1));
+    var editor = answer && answer[0] && typeof answer[0].editor === "boolean" ? answer[0].editor : null;
+    rep("subscribe", true, "editor=" + (editor === null ? "?" : editor));
+    return {
+      title: WIZARD_CFG.link.found,
+      lines: [
+        editor === null ? "Права гостя: сервер не сказал" : (editor ? "Права гостя: редактирование" : "Права гостя: только просмотр"),
+        "Сервер: " + host
+      ],
+      url: link,
+      warn: editor === false ? "Доска только для просмотра: включите редактирование по ссылке" : ""
+    };
+  } finally {
+    s.close();
+  }
+}
+
+// explainFailure says in words what a failed step means for the board; "" leaves the kit's plain "refused at this step".
+function explainFailure(e) {
+  var st = e.status ? " (" + e.status + ")" : "";
+  if (e.step === "link") return "Нужна ссылка на страницу доски: https://pruffme.com/landing/…";
+  if (e.step === "page") return "Страница доски не открывается" + st + ": доски нет или она закрыта";
+  if (e.step === "board") return "По этой ссылке нет доски PRUFFME: проверьте адрес и что доску не удалили";
+  if (e.step === "login") return "PRUFFME не пустил гостя на доску" + st;
+  if (e.step === "subscribe") return "Доска не ответила на вход гостя: проверьте, что доступ по ссылке включён";
+  return "";
+}
+
+function startWizard(values) {
+  if (wizardServer) return;
+  wizardServer = wizard.serve({
+    explain: explainFailure,
+    tag: "[PRUFFME]",
+    service: "PRUFFME",
+    labels: WIZARD_LABELS,
+    reason: "Подключение через PRUFFME",
+    cfg: WIZARD_CFG,
+    values: { url: String((values && values.url) || "") },
+    check: checkBoard
+  });
+}
+
+var urlFromParams = false;
+
+// launch fetches the board and connects to it.
+function launch() {
+  running = true;
+  setState("connecting");
+  bootstrap().then(function (ok) { if (ok) connectOnce(); });
+}
+
 var Transport = {
   info: function () {
     return {
       name: "pruffme",
-      version: "1.0.0",
+      version: "1.1.0",
       cookieDomain: "",
       mtu: 0,
       reliable: false,
@@ -457,16 +663,46 @@ var Transport = {
     };
   },
 
+  // setup is the wizard an app runs while a node is being made (before anything connects): it checks the board and
+  // hands back {client: {...}, node: {...}} through openfluxSubmit.
+  setup: function (values) {
+    startWizard(values || {});
+  },
+
   open: function (cfg) {
-    landingURL = (cfg.params && cfg.params.url) || cfg.url || "";
+    var p = (cfg && cfg.params) || {};
+    landingURL = p.url || (cfg && cfg.url) || "";
+    urlFromParams = !!landingURL;
     if (!landingURL) {
-      setState("dead", "pruffme: no board URL provided");
+      // Nothing in the settings: what an earlier setup page left for this profile.
+      landingURL = String((cookieJar.get() || {}).url || "").trim();
+    }
+    if (!landingURL) {
+      if (p.exit === true || p.exit === "true") {
+        // A node has no one to ask: it needs the link its setup gave it.
+        setState("dead", "у ноды нет ссылки на доску: настройте ноду заново");
+        return;
+      }
+      running = true;
+      setState("connecting");
+      startWizard({});
       return;
     }
-    running = true;
-    setState("connecting");
+    launch();
+  },
 
-    bootstrap().then(function (ok) { if (ok) connectOnce(); });
+  // cookiesApplied: the setup page's answer for this side. Settings the carrier was given outrank it.
+  onEvent: function (kind) {
+    if (kind !== "cookiesApplied" || !running || urlFromParams) return;
+    var link = String((cookieJar.get() || {}).url || "").trim();
+    if (!link || link === landingURL) return;
+    connectGen++;
+    bootGen++;
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    pendingWaiters = [];
+    closeSocket();
+    landingURL = link;
+    launch();
   },
 
   write: function (bytes) {
@@ -481,5 +717,9 @@ var Transport = {
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     pendingWaiters = [];
     closeSocket();
+    if (wizardServer) {
+      try { wizardServer.close(); } catch (e) {}
+      wizardServer = null;
+    }
   },
 };

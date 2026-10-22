@@ -1,7 +1,7 @@
 {
   "id": "pruffme",
   "name": "pruffme",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "OpenFlux",
   "description": "PRUFFME: packets ride cursor position updates on a shared whiteboard.",
   "wire": 1,
