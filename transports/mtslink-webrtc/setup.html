@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MTS-Link — настройка подключения</title>
+<style>
+:root {
+  --bg: #0d1117;
+  --card: #161b22;
+  --card2: #1c2129;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #58a6ff;
+  --accent-dim: rgba(88,166,255,0.15);
+  --ok: #3fb950;
+  --ok-dim: rgba(63,185,80,0.15);
+  --err: #f85149;
+  --err-dim: rgba(248,81,73,0.15);
+  --warn: #d29922;
+  --border: #30363d;
+  --radius: 12px;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f6f8fa;
+    --card: #ffffff;
+    --card2: #f0f3f6;
+    --text: #1f2328;
+    --muted: #656d76;
+    --accent: #0969da;
+    --accent-dim: rgba(9,105,218,0.12);
+    --ok: #1a7f37;
+    --ok-dim: rgba(26,127,55,0.12);
+    --err: #cf222e;
+    --err-dim: rgba(207,34,46,0.12);
+    --warn: #9a6700;
+    --border: #d0d7de;
+  }
+}
+* { box-sizing: border-box; margin: 0; }
+body {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.6 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  padding: 16px;
+  display: flex;
+  justify-content: center;
+}
+.wizard {
+  width: 100%;
+  max-width: 480px;
+  padding-top: 24px;
+}
+.logo {
+  text-align: center;
+  margin-bottom: 24px;
+}
+.logo svg { width: 48px; height: 48px; }
+.logo h1 { font-size: 18px; font-weight: 600; margin-top: 8px; }
+.logo p { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+.steps { display: flex; gap: 4px; margin-bottom: 24px; }
+.steps .dot {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  transition: background 0.3s;
+}
+.steps .dot.active { background: var(--accent); }
+.steps .dot.done { background: var(--ok); }
+
+.step { display: none; }
+.step.visible { display: block; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.card h2 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.card p.desc { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+
+label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+input[type="text"], input[type="password"], textarea {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--card2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+input:focus, textarea:focus { border-color: var(--accent); }
+.field { margin-bottom: 14px; }
+.help { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 14px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 400;
+  cursor: pointer;
+}
+.check input { margin-top: 3px; flex-shrink: 0; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.badge.ok { background: var(--ok-dim); color: var(--ok); }
+.badge.err { background: var(--err-dim); color: var(--err); }
+.badge.wait { background: var(--accent-dim); color: var(--accent); }
+.badge::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.profile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--card2);
+  border-radius: 8px;
+  margin-top: 12px;
+}
+.profile .name { font-weight: 600; font-size: 14px; word-break: break-word; }
+.profile .phone { color: var(--muted); font-size: 12px; }
+.profile .uid { color: var(--muted); font-size: 11px; font-family: monospace; }
+
+.avatar {
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  background: var(--accent-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+.btn {
+  flex: 1;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.btn:active { opacity: 0.8; }
+.btn:disabled { opacity: 0.4; cursor: default; }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-secondary { background: var(--card2); color: var(--text); border: 1px solid var(--border); }
+.btn-ok { background: var(--ok); color: #fff; }
+
+.btn-service {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background: linear-gradient(135deg, #ff4f12 0%, #d93a00 100%);
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+  width: 100%;
+}
+.btn-service:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(255,79,18,0.3); }
+.btn-service:active { transform: translateY(0); }
+.btn-service:disabled { opacity: 0.5; cursor: default; transform: none; box-shadow: none; }
+
+.hint-box {
+  background: var(--card2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.hint-box summary { cursor: pointer; color: var(--accent); font-weight: 500; }
+.hint-box ol { padding-left: 16px; margin-top: 8px; }
+.hint-box li { margin-bottom: 4px; }
+.hint-box code {
+  background: var(--bg);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+.hint-box.warn { border-color: var(--warn); }
+
+.manual-toggle {
+  display: none;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 12px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.manual-toggle:hover { color: var(--accent); }
+
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.summary-row:last-child { border-bottom: none; }
+.summary-row .key { color: var(--muted); flex-shrink: 0; }
+.summary-row .val { font-weight: 500; font-family: monospace; font-size: 12px; text-align: right; word-break: break-all; }
+
+.spinner {
+  display: inline-block;
+  width: 14px; height: 14px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  vertical-align: middle;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="wizard">
+  <div class="logo">
+    <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="24" cy="24" r="22" stroke="var(--accent)" stroke-width="2.5"/>
+      <path d="M24 13 L33 18.5 V29.5 L24 35 L15 29.5 V18.5 Z" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>
+      <circle cx="24" cy="24" r="4" fill="var(--accent)"/>
+    </svg>
+    <h1>Подключение через MTS-Link</h1>
+    <p>Мастер настройки туннеля через встречу</p>
+  </div>
+
+  <div class="steps" id="steps">
+    <div class="dot active"></div>
+    <div class="dot"></div>
+    <div class="dot"></div>
+  </div>
+
+  <!-- Step 1: the meeting -->
+  <div class="step visible" id="step1">
+    <div class="card">
+      <h2>Шаг 1: Встреча</h2>
+      <p class="desc">Клиент и нода зайдут в одну встречу MTS-Link гостями. Вставьте ссылку на неё.</p>
+      <div class="field">
+        <label for="meetingUrl">Ссылка на встречу</label>
+        <input type="text" id="meetingUrl" placeholder="https://my.mts-link.ru/j/…" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </div>
+      <button class="btn-service" id="checkBtn">Проверить встречу</button>
+      <div id="checkStatus" style="margin-top:12px"></div>
+      <div id="checkInfo"></div>
+      <a class="manual-toggle" id="skipCheck" href="#">Продолжить без проверки</a>
+      <details class="hint-box">
+        <summary>Где взять ссылку и что нужно знать</summary>
+        <ol>
+          <li>Создайте в MTS Link встречу (или возьмите свою) и скопируйте ссылку для участников: <code>https://my.mts-link.ru/j/…/…</code></li>
+          <li>Встреча должна быть открыта, пока работает туннель. Обе стороны сидят в ней гостями под именем «Гость».</li>
+          <li>Служебные сообщения туннеля (<code>OF1:…</code>) видны в чате встречи всем её участникам. Берите встречу без посторонних.</li>
+        </ol>
+      </details>
+    </div>
+    <div class="actions">
+      <button class="btn btn-primary" id="step1Next" disabled>Далее</button>
+    </div>
+  </div>
+
+  <!-- Step 2: the node -->
+  <div class="step" id="step2">
+    <div class="card">
+      <h2>Шаг 2: Нода</h2>
+      <p class="desc">Как нода присоединится к встрече и как они найдут друг друга.</p>
+      <label class="check" for="onlyClient">
+        <input type="checkbox" id="onlyClient">
+        <span>Нода уже работает в этой встрече: настроить только клиента</span>
+      </label>
+      <div id="nodeFields">
+        <div class="field">
+          <label for="publicIp">Публичный IP ноды (необязательно)</label>
+          <input type="text" id="publicIp" placeholder="203.0.113.7" autocomplete="off" autocapitalize="off" spellcheck="false">
+          <div class="help">Нужен ноде за NAT или в Docker, чтобы клиент достучался до неё напрямую. Пусто: нода определит IP сама.</div>
+        </div>
+      </div>
+      <details class="hint-box">
+        <summary>Дополнительно: STUN и TURN</summary>
+        <div class="field" style="margin-top:10px">
+          <label for="stun">STUN-серверы</label>
+          <input type="text" id="stun" placeholder="stun:host:3478, stun:other:3478 или none" autocomplete="off" autocapitalize="off" spellcheck="false">
+          <div class="help">Пусто: Cloudflare, Google, webinar.ru и mts.ru.</div>
+        </div>
+        <div class="field">
+          <label for="turn">TURN-сервер</label>
+          <input type="text" id="turn" placeholder="turn:host:3478" autocomplete="off" autocapitalize="off" spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="turnUser">Пользователь TURN</label>
+          <input type="text" id="turnUser" autocomplete="off" autocapitalize="off" spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="turnPass">Пароль TURN</label>
+          <input type="password" id="turnPass" autocomplete="off">
+          <div class="help">Эти настройки получат и клиент, и нода.</div>
+        </div>
+      </details>
+      <div id="step2Status" style="margin-top:12px"></div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-secondary" id="step2Back">Назад</button>
+      <button class="btn btn-primary" id="step2Next">Далее</button>
+    </div>
+  </div>
+
+  <!-- Step 3: summary + submit -->
+  <div class="step" id="step3">
+    <div class="card">
+      <h2>Шаг 3: Готово</h2>
+      <p class="desc">Всё настроено. Проверьте и подтвердите.</p>
+      <div id="summary"></div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-secondary" id="step3Back">Назад</button>
+      <button class="btn btn-ok" id="submitBtn">Готово</button>
+    </div>
+  </div>
+</div>
+
+<script id="init" type="application/json">{}</script>
+<script>
+// The script fills in the init block: the meeting link it already has, if any.
+var INIT = {};
+try { INIT = JSON.parse(document.getElementById("init").textContent || "{}"); } catch (e) {}
+
+var state = { step: 1, url: "", checked: false, event: null };
+
+function $(id) { return document.getElementById(id); }
+
+function esc(s) {
+  var d = document.createElement("div");
+  d.textContent = s == null ? "" : String(s);
+  return d.innerHTML;
+}
+
+function badge(type, html) {
+  return '<span class="badge ' + type + '">' + html + '</span>';
+}
+
+function goStep(n) {
+  state.step = n;
+  for (var i = 1; i <= 3; i++) $("step" + i).classList.toggle("visible", i === n);
+  var dots = document.querySelectorAll(".steps .dot");
+  for (var j = 0; j < dots.length; j++) {
+    dots[j].className = "dot" + (j < n - 1 ? " done" : j === n - 1 ? " active" : "");
+  }
+  if (n === 3) renderSummary();
+}
+
+function api(path, body) {
+  return fetch("/api/" + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  }).then(function (r) { return r.json(); });
+}
+
+// ── Step 1: the meeting ──
+
+function resetCheck() {
+  state.checked = false;
+  state.event = null;
+  $("checkStatus").innerHTML = "";
+  $("checkInfo").innerHTML = "";
+  $("skipCheck").style.display = "none";
+  $("step1Next").disabled = true;
+}
+
+function eventHTML(r) {
+  return '<div class="profile">' +
+    '<div class="avatar">M</div>' +
+    '<div><div class="name">' + esc(r.name || ("Встреча № " + r.eventId)) + '</div>' +
+    '<div class="phone">Сессий: ' + esc(r.sessions) + '</div>' +
+    '<div class="uid">событие ' + esc(r.eventId) + '</div></div></div>';
+}
+
+$("meetingUrl").value = INIT.url || "";
+$("meetingUrl").addEventListener("input", resetCheck);
+$("meetingUrl").addEventListener("keydown", function (e) {
+  if (e.key === "Enter") { e.preventDefault(); $("checkBtn").click(); }
+});
+
+$("checkBtn").onclick = function () {
+  var url = $("meetingUrl").value.trim();
+  resetCheck();
+  if (!url) { $("checkStatus").innerHTML = badge("err", "Вставьте ссылку на встречу"); return; }
+  if (!/^https:\/\//i.test(url)) { $("checkStatus").innerHTML = badge("err", "Ссылка должна начинаться с https://"); return; }
+  state.url = url;
+  $("checkBtn").disabled = true;
+  $("checkStatus").innerHTML = badge("wait", '<span class="spinner"></span> Проверяю встречу...');
+  api("check", { url: url }).then(function (r) {
+    $("checkBtn").disabled = false;
+    if (r.ok) {
+      state.checked = true;
+      state.event = r;
+      $("checkStatus").innerHTML = badge("ok", "Встреча найдена");
+      $("checkInfo").innerHTML = eventHTML(r);
+      $("step1Next").disabled = false;
+    } else {
+      $("checkStatus").innerHTML = badge("err", esc(r.error || "Не удалось проверить встречу"));
+      if (r.network) $("skipCheck").style.display = "block";
+    }
+  }).catch(function (e) {
+    $("checkBtn").disabled = false;
+    $("checkStatus").innerHTML = badge("err", esc(String(e)));
+  });
+};
+
+$("skipCheck").onclick = function (e) {
+  e.preventDefault();
+  state.url = $("meetingUrl").value.trim();
+  $("checkStatus").innerHTML = badge("wait", "Встреча не проверена");
+  $("step1Next").disabled = false;
+};
+
+$("step1Next").onclick = function () { goStep(2); };
+
+// ── Step 2: the node ──
+
+$("onlyClient").onchange = function () {
+  $("nodeFields").style.display = $("onlyClient").checked ? "none" : "block";
+};
+
+$("step2Back").onclick = function () { goStep(1); };
+
+// problems lists what is wrong with the step's fields, in words.
+function problems() {
+  var out = [];
+  var ip = $("publicIp").value.trim();
+  if (!$("onlyClient").checked && ip && !/^[0-9a-fA-F:.]+$/.test(ip)) out.push("Публичный IP: ожидается адрес вида 203.0.113.7");
+  var stun = $("stun").value.trim();
+  if (stun && stun.toLowerCase() !== "none" && stun.toLowerCase() !== "off") {
+    var parts = stun.split(",");
+    for (var i = 0; i < parts.length; i++) {
+      if (!/^stuns?:\S+$/i.test(parts[i].trim())) { out.push("STUN: «" + parts[i].trim() + "» не похож на stun:host:порт"); break; }
+    }
+  }
+  var turn = $("turn").value.trim();
+  if (turn && !/^turns?:\S+$/i.test(turn)) out.push("TURN: ожидается turn:host:порт");
+  if (!turn && ($("turnUser").value.trim() || $("turnPass").value)) out.push("Пользователь и пароль TURN нужны вместе с адресом TURN-сервера");
+  return out;
+}
+
+$("step2Next").onclick = function () {
+  var bad = problems();
+  if (bad.length) {
+    $("step2Status").innerHTML = bad.map(function (b) { return badge("err", esc(b)); }).join("<br>");
+    return;
+  }
+  $("step2Status").innerHTML = "";
+  goStep(3);
+};
+
+// ── Step 3: summary + submit ──
+
+function hostOf(addr) {
+  var m = /^turns?:([^:?\/]+|\[[^\]]+\])/i.exec(addr);
+  return m ? m[1] : addr;
+}
+
+function renderSummary() {
+  var rows = [["Встреча", state.event ? (state.event.name || ("№ " + state.event.eventId)) : "не проверена"]];
+  rows.push(["Нода", $("onlyClient").checked ? "уже работает, настраивается только клиент" : "настраивается этим мастером"]);
+  var ip = $("publicIp").value.trim();
+  if (!$("onlyClient").checked && ip) rows.push(["Публичный IP ноды", ip]);
+  var stun = $("stun").value.trim();
+  if (stun) rows.push(["STUN", stun]);
+  var turn = $("turn").value.trim();
+  if (turn) rows.push(["TURN", hostOf(turn) + ($("turnUser").value.trim() ? " · " + $("turnUser").value.trim() : "") + ($("turnPass").value ? " · пароль задан" : "")]);
+  var html = "";
+  for (var i = 0; i < rows.length; i++) {
+    html += '<div class="summary-row"><span class="key">' + esc(rows[i][0]) + '</span><span class="val">' + esc(rows[i][1]) + '</span></div>';
+  }
+  $("summary").innerHTML = html;
+}
+
+function copy(o) {
+  var out = {};
+  for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) out[k] = o[k];
+  return out;
+}
+
+// What each end keeps. The meeting and the network settings are the same for both; only the node can be told its
+// public IP. The core tells a node it is the node, so there is no exit flag.
+function payload() {
+  var shared = { url: state.url };
+  var stun = $("stun").value.trim();
+  var turn = $("turn").value.trim();
+  if (stun) shared.stun = stun;
+  if (turn) {
+    shared.turn = turn;
+    if ($("turnUser").value.trim()) shared.turn_user = $("turnUser").value.trim();
+    if ($("turnPass").value) shared.turn_pass = $("turnPass").value;
+  }
+  var client = copy(shared);
+  if ($("onlyClient").checked) return { client: client };
+  var node = copy(shared);
+  var ip = $("publicIp").value.trim();
+  if (ip) node.public_ip = ip;
+  return { client: client, node: node };
+}
+
+$("step3Back").onclick = function () { goStep(2); };
+
+$("submitBtn").onclick = function () {
+  var data = payload();
+  if (window.openfluxSubmit) {
+    window.openfluxSubmit(data);
+  } else {
+    $("summary").innerHTML += '<div class="hint-box" style="margin-top:12px">' +
+      '<code>openfluxSubmit</code> не найден — открыто вне приложения.<br>' +
+      'Данные: <pre style="white-space:pre-wrap;font-size:11px;margin-top:4px">' +
+      esc(JSON.stringify(data, null, 2).replace(/"turn_pass": "[^"]*"/g, '"turn_pass": "…"')) + '</pre></div>';
+  }
+};
+</script>
+</body>
+</html>

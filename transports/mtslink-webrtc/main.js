@@ -3,13 +3,19 @@
 // Joins an MTS-Link video conference as a participant, exchanges SDP offer/answer
 // and ICE candidates over Comet WebSocket/Chat signaling, and tunnels data directly
 // through high-speed WebRTC DataChannels with automatic Chat fallback.
+//
+// Written by trader52. OpenFlux's changes on top of 1.2.0 (the wire is untouched: ends of both versions talk):
+//   - the guest is called "Гость" in the meeting (a service shows the name to the other participants);
+//   - the settings are declared as settings, none is a profile field (the wizard fills them, both ends alike);
+//   - Transport.setup: a wizard page that checks the meeting link and hands back {client, node};
+//   - the log carries no public IP and no candidate text; the meeting's page is fetched only from its own site.
 
 var UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36";
 var APP_VERSION = "3.9.207";
 var PING_INTERVAL_MS = 10000;
 
 var meetingURL = "";
-var userName = "OpenFlux-Client";
+var userName = "Гость";
 var isExit = false;
 var running = false;
 
@@ -128,7 +134,7 @@ async function detectPublicIP() {
     });
     if (res.status === 200 && res.body) {
       publicIP = res.body.trim();
-      console.log("[MTS-WebRTC] Detected public IP:", publicIP);
+      console.log("[MTS-WebRTC] Detected public IP");
     }
   } catch (e) {
     try {
@@ -139,7 +145,7 @@ async function detectPublicIP() {
       });
       if (res2.status === 200 && res2.body) {
         publicIP = res2.body.trim();
-        console.log("[MTS-WebRTC] Detected public IP:", publicIP);
+        console.log("[MTS-WebRTC] Detected public IP");
       }
     } catch (e2) {}
   }
@@ -190,6 +196,8 @@ async function getEventInfo() {
 }
 
 async function loadInitialPage() {
+  // The page is not read, only asked for (its cookies): a link that is not the meeting's own site is not fetched.
+  if (!/^https:\/\/([^\/?#@]+\.)?(mts-link|webinar)\.ru(:\d+)?(\/|$)/i.test(meetingURL)) return;
   await http.fetch({
     url: meetingURL,
     method: "GET",
@@ -493,7 +501,7 @@ function addCandidateWithPublicIP(c) {
           sdpMid: c.sdpMid,
           sdpMLineIndex: c.sdpMLineIndex
         };
-        console.log("[MTS-WebRTC] Adding public IP candidate:", pubCandStr.substring(0, 48) + "...");
+        console.log("[MTS-WebRTC] Adding public IP candidate");
         localCandidates.push(pubCandidate);
       }
     }
@@ -925,69 +933,202 @@ function cleanup() {
   }
 }
 
+// ===== Setup wizard =====
+//
+// Transport.setup (an app runs it while a node is being made) and open() without a link both serve the wizard page
+// on a loopback port and ask the app to show it. The page checks the meeting here (/api/check) and hands back
+// {client, node} through window.openfluxSubmit; the answer for this side returns as cookiesApplied.
+
+var SETUP_HTML = require("./setup_html.js");
+var wizardServer = null;
+
+function jsonResponse(obj) {
+  return { status: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) };
+}
+
+// eventIDOf reads the event's id out of a meeting link, the way getEventInfo does.
+function eventIDOf(link) {
+  link = String(link || "");
+  var m = link.match(/\/j\/(\d+)\/(\d+)\/session\/(\d+)/);
+  if (m) return m[1];
+  m = link.match(/\/j\/(\d+)\/(\d+)/);
+  return m ? m[2] : "";
+}
+
+// nameOf is the event's title for the wizard to show, when the API names one.
+function nameOf(ev) {
+  var t = ev && (ev.name || ev.title || ev.eventName);
+  return typeof t === "string" ? t.trim().slice(0, 80) : "";
+}
+
+// checkMeeting answers the wizard's "does this meeting exist": the event's own record from the API. Nobody joins.
+function checkMeeting(req) {
+  var body;
+  try { body = JSON.parse(text.decode(req.body)); } catch (e) {
+    return { status: 400, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ok: false, error: "bad json" }) };
+  }
+  var link = String(body.url || "").trim();
+  if (!/^https:\/\//i.test(link)) return jsonResponse({ ok: false, error: "Ссылка должна начинаться с https://" });
+  var id = eventIDOf(link);
+  if (!id) return jsonResponse({ ok: false, error: "В ссылке нет номера встречи: нужна ссылка вида https://my.mts-link.ru/j/…/…" });
+
+  return http.fetch({
+    url: "https://gw.mts-link.ru/api/event/" + id,
+    method: "GET",
+    headers: {
+      "User-Agent": UA,
+      "X-Device-Id": generateDeviceID(),
+      "X-Device": "Chrome 153.0.0.0",
+      "X-Os": "Linux",
+      "X-App-Version": APP_VERSION,
+      "X-Platform": "Web",
+      "Accept": "*/*"
+    }
+  }).then(function (res) {
+    if (res.status === 404) return jsonResponse({ ok: false, error: "Встреча не найдена (404)" });
+    if (res.status !== 200) return jsonResponse({ ok: false, error: "MTS-Link ответил " + res.status });
+    var ev;
+    try { ev = JSON.parse(res.body); } catch (e) { return jsonResponse({ ok: false, error: "Неожиданный ответ MTS-Link" }); }
+    var sessions = (ev && ev.eventSessions && ev.eventSessions.length) || 0;
+    if (!sessions) return jsonResponse({ ok: false, error: "У встречи нет сессий: присоединяться некуда" });
+    return jsonResponse({ ok: true, eventId: id, sessions: sessions, name: nameOf(ev) });
+  }).catch(function (e) {
+    return jsonResponse({ ok: false, network: true, error: "Нет связи с MTS-Link: " + String(e) });
+  });
+}
+
+// startWizard serves the setup page and asks the app to show it. values are what is known (values.url prefills the
+// link).
+function startWizard(values) {
+  if (wizardServer) return;
+  var init = { url: String((values && values.url) || "") };
+  var page = SETUP_HTML.replace(
+    '<script id="init" type="application/json">{}</script>',
+    '<script id="init" type="application/json">' + JSON.stringify(init).replace(/</g, "\\u003c") + "</script>"
+  );
+  wizardServer = httpserver.listen(function (req) {
+    if (req.path === "/" || req.path === "") {
+      return { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" }, body: page };
+    }
+    if (req.path === "/api/check" && req.method === "POST") {
+      return checkMeeting(req);
+    }
+    return { status: 404, body: "not found" };
+  });
+  raise("needsSetup", {
+    url: "http://" + wizardServer.addr + "/",
+    reason: "Подключение через MTS-Link"
+  });
+}
+
 // ===== Transport Interface =====
+
+var urlFromParams = false;
+
+// readSettings takes the settings the transport runs with, from cfg.params or from what a setup page left in the
+// cookie jar, and resets the ones it does not name. It returns the meeting link.
+function readSettings(p, link) {
+  p = p || {};
+  meetingURL = String(link || p.url || "").trim();
+  publicIP = p.public_ip ? String(p.public_ip).trim() : "";
+  activeStunServers = defaultStunServers.slice();
+  if (p.stun) {
+    var sVal = String(p.stun).trim();
+    if (sVal === "none" || sVal === "off" || sVal === "false") {
+      activeStunServers = [];
+    } else {
+      activeStunServers = sVal.split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+    }
+  }
+  customTurn = p.turn ? String(p.turn) : "";
+  customTurnUser = p.turn_user ? String(p.turn_user) : "";
+  customTurnPass = p.turn_pass ? String(p.turn_pass) : "";
+  return meetingURL;
+}
+
+// startSession runs the role with the settings read: both ends join the meeting, the client makes the offer.
+function startSession() {
+  var roleName = isExit ? "Exit" : "Client";
+  deviceID = generateDeviceID();
+  runID = generateRunID();
+  peerRunID = "";
+  peerUserID = 0;
+  reconnectAttempt = 0;
+  chatQueue = [];
+
+  console.log("[MTS-WebRTC] Starting transport (role=" + roleName + ", runID=" + runID + ", stunServers=" + activeStunServers.length + ")");
+
+  running = true;
+  setState("connecting");
+  connectAndServe();
+}
 
 var Transport = {
   info: function() {
     return {
       name: "mtslink-webrtc",
-      version: "1.2.0",
+      version: "1.3.0",
       cookieDomain: "",
       mtu: 1200,
       reliable: false,
       ordered: false,
       halfDuplex: false,
       minIntervalMs: 0,
+      // All of them are settings, none is the profile's one input: the wizard hands each end its values, and a
+      // profile field would be wiped by it. Which end this is the core says itself (cfg.params.exit).
       params: [
-        { key: "url", label: "MTS-Link Meeting URL", type: "url", required: true },
-        { key: "public_ip", label: "Public IP (for NAT/Docker servers)", type: "string" },
-        { key: "stun", label: "STUN Servers (comma-separated, or 'none')", type: "string" },
-        { key: "turn", label: "TURN Server (turn:host:port)", type: "string" },
-        { key: "turn_user", label: "TURN Username", type: "string" },
-        { key: "turn_pass", label: "TURN Password", type: "password" }
+        { key: "url", label: "Ссылка на встречу MTS-Link", type: "url", required: true, scope: "settings",
+          placeholder: "https://my.mts-link.ru/j/…/…",
+          description: "Клиент и нода заходят в эту встречу гостями." },
+        { key: "public_ip", label: "Публичный IP ноды", type: "text", scope: "settings", advanced: true,
+          description: "Нужен ноде за NAT или в Docker, чтобы клиент достучался до неё напрямую. Пусто: определится сам." },
+        { key: "stun", label: "STUN-серверы", type: "text", scope: "settings", advanced: true,
+          placeholder: "stun:host:3478, stun:other:3478",
+          description: "Через запятую, или none: без STUN. Пусто: Cloudflare, Google, webinar.ru и mts.ru." },
+        { key: "turn", label: "TURN-сервер", type: "text", scope: "settings", advanced: true, placeholder: "turn:host:3478" },
+        { key: "turn_user", label: "Пользователь TURN", type: "text", scope: "settings", advanced: true },
+        { key: "turn_pass", label: "Пароль TURN", type: "secret", scope: "settings", advanced: true }
       ]
     };
   },
 
+  // setup is the wizard an app runs while a node is being made (before anything connects): it checks the meeting
+  // and hands back {client: {...}, node: {...}} through openfluxSubmit.
+  setup: function(values) {
+    startWizard(values || {});
+  },
+
   open: function(cfg) {
-    meetingURL = cfg.url || (cfg.params && cfg.params.url);
+    var p = (cfg && cfg.params) || {};
+    isExit = (p.exit === "true" || p.exit === true);
+    urlFromParams = !!readSettings(p, cfg && cfg.url);
     if (!meetingURL) {
-      setState("dead", "no meeting URL provided");
+      // Nothing in the settings: what an earlier setup page left for this profile.
+      var saved = cookieJar.get() || {};
+      if (saved.url) readSettings(saved, "");
+    }
+    if (!meetingURL) {
+      if (isExit) {
+        // A node has no one to ask: it needs the link its setup gave it.
+        setState("dead", "у ноды нет ссылки на встречу: настройте ноду заново");
+        return;
+      }
+      running = true;
+      setState("connecting");
+      startWizard({});
       return;
     }
+    startSession();
+  },
 
-    var exitParam = cfg.params && cfg.params.exit;
-    isExit = (exitParam === "true" || exitParam === true);
-
-    activeStunServers = defaultStunServers.slice();
-    if (cfg.params) {
-      if (cfg.params.public_ip) {
-        publicIP = String(cfg.params.public_ip).trim();
-      }
-      if (cfg.params.stun) {
-        var sVal = cfg.params.stun.trim();
-        if (sVal === "none" || sVal === "off" || sVal === "false") {
-          activeStunServers = [];
-        } else {
-          activeStunServers = sVal.split(",").map(function(s) { return s.trim(); });
-        }
-      }
-      if (cfg.params.turn) customTurn = cfg.params.turn;
-      if (cfg.params.turn_user) customTurnUser = cfg.params.turn_user;
-      if (cfg.params.turn_pass) customTurnPass = cfg.params.turn_pass;
-    }
-
-    var roleName = isExit ? "Exit" : "Client";
-    userName = "OpenFlux-" + roleName;
-
-    deviceID = generateDeviceID();
-    runID = generateRunID();
-
-    console.log("[MTS-WebRTC] Starting transport (role=" + roleName + ", runID=" + runID + ", stunServers=" + activeStunServers.length + ")");
-
-    running = true;
-    setState("connecting");
-    connectAndServe();
+  // cookiesApplied: the setup page's answer for this side. Settings the carrier was given outrank it.
+  onEvent: function(kind) {
+    if (kind !== "cookiesApplied" || !running || urlFromParams) return;
+    var c = cookieJar.get() || {};
+    if (!c.url || c.url === meetingURL) return;
+    cleanup();
+    readSettings(c, "");
+    startSession();
   },
 
   write: function(bytes) {
@@ -1011,6 +1152,10 @@ var Transport = {
   },
 
   close: function() {
+    if (wizardServer) {
+      try { wizardServer.close(); } catch (e) {}
+      wizardServer = null;
+    }
     cleanup();
   }
 };

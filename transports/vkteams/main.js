@@ -4,12 +4,19 @@
 // using the VK Teams calls signaling WebSocket (custom-data command).
 //
 // Params:
-//   url:  VK Teams call join link (e.g. https://calls.myteam.mail.ru/join/...)
-//   exit: true for exit node (listener), false for client (initiator)
+//   url:   VK Teams call join link (e.g. https://calls.myteam.mail.ru/join/...)
+//   relay: true to use the call's TURN server only
+//   exit:  set by the core: true on the node (listener), false on the client (initiator)
+//
+// Written by trader52. OpenFlux's changes on top of 1.0.0 (the wire is untouched: ends of both versions talk):
+//   - the guest is called "Гость" and has an ordinary device id (the service shows both to the other participants);
+//   - the settings are declared as settings, none is a profile field (the wizard fills them, both ends alike);
+//   - Transport.setup: a wizard page that checks the call link and hands back {client, node};
+//   - the log carries no signaling address and no candidate text.
 
 var BASE_URL = "https://u.myteam.vmailru.net";
 var API_VERSION = "v149";
-var GUEST_NAME = "OpenFluxGuest";
+var GUEST_NAME = "Гость";
 var UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 var running = false;
@@ -33,6 +40,20 @@ var targetPeerId = "";
 
 function nextSeq() {
   return wsSeq++;
+}
+
+// newDeviceID is an ordinary random id of a browser's shape (8-4-4-4-12 hex).
+function newDeviceID() {
+  var h = "";
+  for (var i = 0; i < 32; i++) h += Math.floor(Math.random() * 16).toString(16);
+  return h.slice(0, 8) + "-" + h.slice(8, 12) + "-4" + h.slice(13, 16) + "-" +
+    "89ab".charAt(Math.floor(Math.random() * 4)) + h.slice(17, 20) + "-" + h.slice(20, 32);
+}
+
+// hostOf names an address by its scheme and host, never by its query (a signaling address carries the call's token).
+function hostOf(url) {
+  var m = /^(wss?:\/\/[^\/?#]+)/.exec(String(url));
+  return m ? m[1] : "?";
 }
 
 function extractJoinLink(url) {
@@ -104,8 +125,8 @@ async function authenticateAndJoin(link) {
   } catch (e) {}
 
   // 2. Auth as guest
-  var guestName = isExit ? "OpenFluxExit" : "OpenFluxClient";
-  var devId = "openflux-" + (isExit ? "exit-" : "client-") + (Date.now() % 1000000);
+  var guestName = GUEST_NAME;
+  var devId = newDeviceID();
 
   var authResp = await http.fetch({
     url: BASE_URL + "/api/" + API_VERSION + "/rapi/auth/guest",
@@ -475,7 +496,7 @@ function handleRemoteCandidate(candData, epoch) {
     if (forceRelay && c.candidate.indexOf("typ relay") === -1) {
       return;
     }
-    console.log("[VKTEAMS] " + (isExit ? "exit" : "client") + " applying remote candidate: " + c.candidate);
+    console.log("[VKTEAMS] " + (isExit ? "exit" : "client") + " applying remote candidate (" + ((/ typ (\w+)/.exec(c.candidate) || [])[1] || "?") + ")");
     if (pc && haveRemoteDesc) {
       pc.addIceCandidate(c);
     } else {
@@ -541,7 +562,7 @@ function handleSocketMessage(msg) {
 
 async function connectWebSocket(endpoint) {
   var wsURL = endpoint + "&platform=WEB&appVersion=1.1&version=6&device=browser&capabilities=253F&clientType=VK_TEAMS&tgt=join";
-  console.log("[VKTEAMS] opening ws: " + wsURL.substring(0, 60) + "...");
+  console.log("[VKTEAMS] opening ws: " + hostOf(wsURL));
   var sock = await ws.open(wsURL, {
     "Origin": "https://myteam.mail.ru",
     "User-Agent": UA
@@ -579,53 +600,171 @@ async function connectOnce() {
   }
 }
 
+// ===== Setup wizard =====
+//
+// Transport.setup (an app runs it while a node is being made) and open() without a link both serve the wizard page
+// on a loopback port and ask the app to show it. The page checks the call here (/api/check) and hands back
+// {client, node} through window.openfluxSubmit; the answer for this side returns as cookiesApplied.
+
+var SETUP_HTML = require("./setup_html.js");
+var wizardServer = null;
+
+function jsonResponse(obj) {
+  return { status: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) };
+}
+
+// checkCall answers the wizard's "does this call exist": the guest sign-in chain the transport starts with, up to
+// joining the conversation by its link. No signaling socket is opened, so the check leaves nothing in the call.
+function checkCall(req) {
+  var body;
+  try { body = JSON.parse(text.decode(req.body)); } catch (e) {
+    return { status: 400, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ok: false, error: "bad json" }) };
+  }
+  var link = extractJoinLink(String(body.url || "").trim());
+  if (!/^[\w-]{4,128}$/.test(link)) {
+    return jsonResponse({ ok: false, error: "В ссылке нет кода звонка: нужна ссылка вида https://calls.myteam.mail.ru/join/…" });
+  }
+  return authenticateAndJoin(link).then(function (conv) {
+    if (!conv || !conv.endpoint) return jsonResponse({ ok: false, error: "VK Teams не вернул адрес звонка: он закончился?" });
+    var turn = !!(conv.turn_server && conv.turn_server.urls && conv.turn_server.urls.length);
+    var stun = !!(conv.stun_server && conv.stun_server.urls && conv.stun_server.urls.length);
+    return jsonResponse({ ok: true, turn: turn, stun: stun, code: link.slice(0, 4) + "…" });
+  }).catch(function (e) {
+    var msg = String(e && e.message || e);
+    // An answer the service gave (a status) is about the call; anything else is the way to it.
+    var st = /failed: (\d+)/.exec(msg);
+    if (st) {
+      return jsonResponse({ ok: false, error: /join conversation failed/.test(msg)
+        ? "Звонок не найден или уже закончился (" + st[1] + ")"
+        : "VK Teams отказал в гостевом входе (" + st[1] + ")" });
+    }
+    return jsonResponse({ ok: false, network: true, error: "Нет связи с VK Teams: " + msg.slice(0, 160) });
+  });
+}
+
+// startWizard serves the setup page and asks the app to show it. values are what is known (values.url prefills the
+// link, values.relay the option).
+function startWizard(values) {
+  if (wizardServer) return;
+  var v = values || {};
+  var init = { url: String(v.url || ""), relay: v.relay === "true" || v.relay === true };
+  var page = SETUP_HTML.replace(
+    '<script id="init" type="application/json">{}</script>',
+    '<script id="init" type="application/json">' + JSON.stringify(init).replace(/</g, "\\u003c") + "</script>"
+  );
+  wizardServer = httpserver.listen(function (req) {
+    if (req.path === "/" || req.path === "") {
+      return { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" }, body: page };
+    }
+    if (req.path === "/api/check" && req.method === "POST") {
+      return checkCall(req);
+    }
+    return { status: 404, body: "not found" };
+  });
+  raise("needsSetup", {
+    url: "http://" + wizardServer.addr + "/",
+    reason: "Подключение через VK Teams"
+  });
+}
+
+// ===== Transport Interface =====
+
+var urlFromParams = false;
+
+// readSettings takes the settings the transport runs with, from cfg.params or from what a setup page left in the
+// cookie jar. It returns the call's join code.
+function readSettings(p, link) {
+  p = p || {};
+  joinLink = extractJoinLink(String(link || p.url || "").trim());
+  forceRelay = (p.relay === "true" || p.relay === true);
+  return joinLink;
+}
+
+// launch signs in and joins; a failed attempt is tried again every few seconds.
+function launch() {
+  running = true;
+  setState("connecting");
+  connectOnce().catch(function (e) {
+    setState("reconnecting", String(e));
+    setTimeout(function () {
+      if (running) connectOnce().catch(function () {});
+    }, 3000);
+  });
+}
+
+// stopSocket lets go of the signaling socket without the reconnect its close would start.
+function stopSocket() {
+  if (!wsConn) return;
+  var sock = wsConn;
+  wsConn = null;
+  sock.onclose = null;
+  sock.onmessage = null;
+  try { sock.close(); } catch (e) {}
+}
+
 var Transport = {
   info: function () {
     return {
       name: "vkteams",
-      version: "1.0.0",
+      version: "1.1.0",
       mtu: 0,
       reliable: true,
       ordered: true,
+      // Both are settings, none is the profile's one input: the wizard hands each end its values, and a profile
+      // field would be wiped by it. Which end this is the core says itself (cfg.params.exit).
       params: [
-        { key: "url", label: "VK Teams Call Join URL", type: "url", required: true },
-        { key: "exit", label: "Run as Exit Node", type: "boolean", default: false },
-        { key: "relay", label: "Force TURN relay only", type: "boolean", default: false }
+        { key: "url", label: "Ссылка на звонок VK Teams", type: "url", required: true, scope: "settings",
+          placeholder: "https://calls.myteam.mail.ru/join/…",
+          description: "Клиент и нода заходят в этот звонок гостями." },
+        { key: "relay", label: "Только через TURN", type: "boolean", scope: "settings", advanced: true, default: "false",
+          description: "Весь трафик пойдёт через сервер VK: медленнее, но проходит там, где прямой путь закрыт." }
       ]
     };
   },
 
-  open: async function (cfg) {
-    running = true;
-    setState("connecting");
+  // setup is the wizard an app runs while a node is being made (before anything connects): it checks the call and
+  // hands back {client: {...}, node: {...}} through openfluxSubmit.
+  setup: function (values) {
+    startWizard(values || {});
+  },
 
-    var rawURL = cfg.url || (cfg.params && cfg.params.url) || "";
-    joinLink = extractJoinLink(rawURL);
+  open: function (cfg) {
+    var p = (cfg && cfg.params) || {};
+    isExit = (p.exit === "true" || p.exit === true || p.role === "exit");
+    urlFromParams = !!readSettings(p, cfg && cfg.url);
     if (!joinLink) {
-      setState("dead", "missing join url");
+      // Nothing in the settings: what an earlier setup page left for this profile.
+      var saved = cookieJar.get() || {};
+      if (saved.url) readSettings(saved, "");
+    }
+    if (!joinLink) {
+      if (isExit) {
+        // A node has no one to ask: it needs the link its setup gave it.
+        setState("dead", "у ноды нет ссылки на звонок: настройте ноду заново");
+        return;
+      }
+      running = true;
+      setState("connecting");
+      startWizard({});
       return;
     }
+    launch();
+  },
 
-    if (cfg.params && (cfg.params.exit === "true" || cfg.params.exit === true || cfg.params.role === "exit")) {
-      isExit = true;
-    } else {
-      isExit = false;
-    }
-
-    if (cfg.params && (cfg.params.relay === "true" || cfg.params.relay === true)) {
-      forceRelay = true;
-    } else {
-      forceRelay = false;
-    }
-
-    try {
-      await connectOnce();
-    } catch (e) {
-      setState("reconnecting", String(e));
-      setTimeout(function () {
-        if (running) connectOnce().catch(function () {});
-      }, 3000);
-    }
+  // cookiesApplied: the setup page's answer for this side. Settings the carrier was given outrank it.
+  onEvent: function (kind) {
+    if (kind !== "cookiesApplied" || !running || urlFromParams) return;
+    var c = cookieJar.get() || {};
+    var link = extractJoinLink(String(c.url || "").trim());
+    if (!link || link === joinLink) return;
+    resetCallState();
+    stopSocket();
+    callConfig = null;
+    myPeerId = "";
+    targetPeerId = "";
+    offerEpoch = 0;
+    readSettings(c, "");
+    launch();
   },
 
   write: function (bytes) {
@@ -638,10 +777,11 @@ var Transport = {
   close: function () {
     running = false;
     setState("dead");
-    resetCallState();
-    if (wsConn) {
-      try { wsConn.close(); } catch (e) {}
-      wsConn = null;
+    if (wizardServer) {
+      try { wizardServer.close(); } catch (e) {}
+      wizardServer = null;
     }
+    resetCallState();
+    stopSocket();
   }
 };
