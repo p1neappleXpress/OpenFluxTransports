@@ -1,7 +1,7 @@
 {
   "id": "boards",
   "name": "boards",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "OpenFlux",
   "description": "Yandex Boards: packets ride text objects on a shared whiteboard.",
   "wire": 1,

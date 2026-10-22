@@ -14,6 +14,7 @@
 // build it with scriptbundle, then re-sign the output.
 
 var captcha = require("../../lib/captcha.js");
+var wizard = require("../../lib/wizard.js");
 
 var BOARDS_BASE = "boards.yandex.ru";
 var UA = "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 " +
@@ -180,25 +181,29 @@ function writeEventObj(ns, obj) {
   sock.send(msg);
 }
 
-function sendSubscribe() {
+// buildSubscribe: the subscribe-slide-dashboard event as a pure function of its
+// board/participant inputs (no module globals), so the setup wizard's check can
+// build the very same subscription against local state. The transport's
+// sendSubscribe() feeds it the globals; the byte output is unchanged.
+function buildSubscribe(p) {
   var data = {
-    session: sessionId,
-    dashboard: dashboard,
-    presentation: hash,
+    session: p.session,
+    dashboard: p.dashboard,
+    presentation: p.presentation,
     properties: {
       guest_mode: true, guest_role: 1, guest_password: null,
-      guest_password_expiration_date: null, current_slide: currentSlide,
+      guest_password_expiration_date: null, current_slide: p.currentSlide,
     },
     participant_team_role: -1,
-    participant: participantHash,
+    participant: p.participant,
     options: {
       type: "landing",
       participant: {
-        hash: participantHash, partner: "yandex", userHash: userHash,
-        name: name, additional: { guest: true }, module: "yandex",
-        presentation: hash,
-        identityCandidates: { uidHash: null, legacyHash: participantHash, uid: null, partner: "yandex" },
-        module_type: "yandex", participantCaptionName: name,
+        hash: p.participant, partner: "yandex", userHash: p.userHash,
+        name: p.name, additional: { guest: true }, module: "yandex",
+        presentation: p.presentation,
+        identityCandidates: { uidHash: null, legacyHash: p.participant, uid: null, partner: "yandex" },
+        module_type: "yandex", participantCaptionName: p.name,
       },
       intermediate: "",
       device: {
@@ -210,7 +215,14 @@ function sendSubscribe() {
       },
     },
   };
-  writeEventObj("dashboard", { action: "subscribe-slide-dashboard", data: data, participant: participantHash });
+  return { action: "subscribe-slide-dashboard", data: data, participant: p.participant };
+}
+
+function sendSubscribe() {
+  writeEventObj("dashboard", buildSubscribe({
+    session: sessionId, dashboard: dashboard, presentation: hash,
+    currentSlide: currentSlide, participant: participantHash, userHash: userHash, name: name,
+  }));
 }
 
 // buildModifyObjects: the modify-objects dashboard event carrying one packet
@@ -554,11 +566,218 @@ async function connectAndServe(myGen) {
   setState("connected");
 }
 
+// ---- setup wizard ----
+//
+// Transport.setup (an app runs it while a node is being made) and open() without a link serve the kit wizard page on a
+// loopback port and ask the app to show it. The page checks the board here (/api/check) and hands back {client, node}
+// through window.openfluxSubmit; the answer for this side returns as cookiesApplied.
+
+var WIZARD_LABELS = {
+  link: "Ссылка",
+  captcha: "Капча",
+  guest: "Вход гостем",
+  info: "Данные доски",
+  socket: "Соединение с сервером",
+  subscribe: "Подписка на доску"
+};
+
+var WIZARD_CFG = {
+  service: "Яндекс Доски",
+  title: "Подключение через Яндекс Доски",
+  tagline: "Мастер настройки туннеля через доску",
+  link: {
+    title: "Шаг 1: Доска",
+    desc: "Клиент и нода зайдут гостями на одну доску Яндекса.",
+    label: "Ссылка на доску",
+    placeholder: "https://boards.yandex.ru/…?hash=…",
+    check: "Проверить доску",
+    checking: "Проверяю доску…",
+    found: "Доска найдена",
+    summary: "Доска",
+    howTitle: "Где взять ссылку и что нужно знать",
+    how: [
+      "Создайте доску на boards.yandex.ru и нажмите «Поделиться».",
+      "Включите доступ «у кого есть ссылка, может редактировать» и скопируйте ссылку: в ней есть <code>?hash=…</code>",
+      "Одна доска держит одну пару «клиент и нода». Для второй пары нужна вторая доска.",
+      "Если Яндекс покажет капчу, пройдите её в браузере и проверьте ссылку снова.",
+      "Проверка заходит на доску гостем так же, как туннель, и тут же уходит: на доске ничего не остаётся."
+    ]
+  },
+  create: {
+    tab: "Создать на сайте",
+    have: "Есть ссылка",
+    desc: "Откроется boards.yandex.ru: войдите, создайте доску, включите доступ по ссылке и откройте ссылку-приглашение (в адресе появится hash=). Окно закроется само, когда откроется такая страница; если нет — нажмите «Это она».",
+    button: "Открыть Яндекс Доски",
+    waiting: "Создайте доску и откройте ссылку-приглашение в окне…",
+    url: "https://boards.yandex.ru/",
+    title: "Яндекс Доски",
+    match: "^https://boards\\.yandex\\.ru/.*hash=",
+    hint: "Откройте ссылку-приглашение с hash="
+  },
+  mode: {
+    title: "Шаг 2: Режим",
+    desc: "Как клиент и нода будут связываться через доску.",
+    onlyClient: "Нода уже работает на этой доске: настроить только клиента",
+    note: "На одной доске работает одна пара. Вторую ноду на ту же доску не ставьте: пакеты смешаются."
+  },
+  options: []
+};
+
+var wizardServer = null;
+
+// checkBoard walks the board the way the transport does (the page/captcha, the guest token, the board's info, one
+// socket with the subscription) and leaves again: it keeps nothing of the transport's own state, so it can run next to
+// a live one. It reuses the transport's own pure builders (extractHash, postAPI, getAllowCaptcha, getWhiteboardInfo,
+// jwtPayload, buildSubscribe) so a green check means the transport's own path is open.
+async function checkBoard(raw, rep) {
+  var link = String(raw || "").trim();
+  if (!/^https:\/\/[^\/\s]+\//i.test(link)) {
+    throw new wizard.StepError("link", "not an https address of a page");
+  }
+  var h = extractHash(link);
+  if (!h) throw new wizard.StepError("link", "no ?hash= in the URL");
+  rep("link", true, wizard.hostName(link));
+
+  // The captcha is passed the same way the transport passes it (the shared PoW solver). A SmartCaptcha that a human
+  // must clear cannot be solved here: it is reported as its own step, not hidden behind a later failure.
+  var docURL = "https://" + BOARDS_BASE + "/whiteboard/?hash=" + h;
+  var hadCaptcha = false;
+  try {
+    if (await getAllowCaptcha(docURL, h)) {
+      hadCaptcha = true;
+      await captcha.solveCaptcha(UA, docURL);
+      if (await getAllowCaptcha(docURL, h)) {
+        throw new wizard.StepError("captcha", "still shown after the PoW solve");
+      }
+    }
+  } catch (e) {
+    if (e instanceof wizard.StepError) throw e;
+    throw new wizard.StepError("captcha", wizard.errText(e));
+  }
+  rep("captcha", true, hadCaptcha ? "passed" : "not required");
+
+  var guestName = "guest_" + randHex(6);
+  var tokenRes;
+  try {
+    tokenRes = await postAPI(h, "request-guest-token", { name: guestName, hash: h });
+  } catch (e) {
+    throw new wizard.StepError("guest", wizard.errText(e), 0, true);
+  }
+  if (tokenRes.status !== 200) throw new wizard.StepError("guest", "request-guest-token HTTP " + tokenRes.status, tokenRes.status);
+  var jar = cookieJar.get() || {};
+  var token = jar["token_" + h] || "";
+  if (!token) throw new wizard.StepError("guest", "no guest token was issued");
+  var payload = jwtPayload(token) || {};
+  var localUser = payload.u || "";
+  rep("guest", true, "guest token issued");
+
+  var state;
+  try {
+    state = await getWhiteboardInfo(h);
+  } catch (e) {
+    throw new wizard.StepError("info", wizard.errText(e));
+  }
+  if (!state.dashboard) throw new wizard.StepError("info", "no slide in get-whiteboard-info");
+  var host = state.ws_host || SOCKET_HOST_DEFAULT;
+  rep("info", true, "slide found");
+
+  if (!jar["token_" + h]) jar["token_" + h] = token;
+  var cookieStr = Object.keys(jar).map(function (k) { return k + "=" + jar[k]; }).join("; ");
+  var s = await wizard.openSocket("socket", "wss://" + host + "/socket.io/?EIO=4&transport=websocket", {
+    "User-Agent": UA,
+    Origin: "https://" + BOARDS_BASE,
+    "Accept-Language": "en-US,en;q=0.9",
+    Cookie: cookieStr,
+  }, { readTimeoutMs: 20000 });
+  var n = 0;
+  var say = function (ns, obj) {
+    var id = n++;
+    s.send("42" + id + JSON.stringify([ns, obj]));
+    return id;
+  };
+  try {
+    var any = function () { return true; };
+    if ((await s.wait(any, 10000)) === null) throw new wizard.StepError("socket", "the server did not greet");
+    s.send("40");
+    if ((await s.wait(any, 10000)) === null) throw new wizard.StepError("socket", "the server did not accept the connection");
+    rep("socket", true, host);
+
+    say("im", { operation: "subscribe", user: null });
+    if ((await s.wait(function (m) { return m.indexOf('"subscribed"') !== -1; }, 10000)) === null) {
+      throw new wizard.StepError("subscribe", "no answer to the first subscription");
+    }
+    say("dashboard", buildSubscribe({
+      session: "", dashboard: state.dashboard, presentation: h,
+      currentSlide: state.current_slide, participant: localUser, userHash: localUser, name: guestName,
+    }));
+    var got = await s.wait(function (m) {
+      return m.indexOf("431[") === 0 ||
+        (m.indexOf('"subscribed":true') !== -1 && m.indexOf('"dashboard_link"') !== -1);
+    }, HANDSHAKE_WAIT_MS);
+    if (got === null) throw new wizard.StepError("subscribe", "no answer to the board's subscription");
+    rep("subscribe", true, "guest subscribed");
+    return {
+      title: WIZARD_CFG.link.found,
+      lines: ["Доска открыта для гостя", "Сервер: " + host],
+      url: link,
+      warn: ""
+    };
+  } finally {
+    s.close();
+  }
+}
+
+// explainFailure says in words what a failed step means for the board; "" leaves the kit's plain "refused at this step".
+function explainFailure(e) {
+  var st = e.status ? " (" + e.status + ")" : "";
+  if (e.step === "link") return "Нужна ссылка на доску с ?hash=…: https://boards.yandex.ru/…?hash=…";
+  if (e.step === "captcha") return "Яндекс просит пройти капчу. Откройте доску в браузере, пройдите капчу и проверьте ссылку снова.";
+  if (e.step === "guest") return "Яндекс не выдал гостевой доступ к доске" + st + ": проверьте, что включён доступ по ссылке";
+  if (e.step === "info") return "Не удалось получить данные доски" + st + ": проверьте адрес и что доску не удалили";
+  if (e.step === "subscribe") return "Доска не ответила на вход гостя: проверьте, что доступ по ссылке включён";
+  return "";
+}
+
+function startWizard(values) {
+  if (wizardServer) return;
+  wizardServer = wizard.serve({
+    explain: explainFailure,
+    tag: "[BOARDS]",
+    service: "Яндекс Доски",
+    labels: WIZARD_LABELS,
+    reason: "Подключение через Яндекс Доски",
+    cfg: WIZARD_CFG,
+    values: { url: String((values && values.url) || "") },
+    check: checkBoard
+  });
+}
+
+// ---- lifecycle ----
+
+var rawURL = "";
+var urlFromParams = false;
+
+// launch reads the board from rawURL and connects to it.
+function launch() {
+  hash = extractHash(rawURL);
+  if (!hash) {
+    setState("dead", "boards: в ссылке нет ?hash=");
+    return;
+  }
+  name = "guest_" + randHex(6);
+  running = true;
+  setState("connecting");
+  authorize().then(
+    function () { connectOnce(); },
+    function (e) { setState("dead", String(e)); }
+  );
+}
+
 var Transport = {
   info: function () {
     return {
       name: "boards",
-      version: "1.1.0",
+      version: "1.2.0",
       cookieDomain: "https://boards.yandex.ru/",
       mtu: 0,
       reliable: false,
@@ -569,21 +788,32 @@ var Transport = {
     };
   },
 
+  // setup is the wizard an app runs while a node is being made (before anything connects): it checks the board and
+  // hands back {client: {...}, node: {...}} through openfluxSubmit.
+  setup: function (values) {
+    startWizard(values || {});
+  },
+
   open: function (cfg) {
-    var raw = (cfg.params && cfg.params.url) || cfg.url || "";
-    hash = extractHash(raw);
-    if (!hash) {
-      setState("dead", "boards: no hash in URL");
+    var p = (cfg && cfg.params) || {};
+    rawURL = p.url || (cfg && cfg.url) || "";
+    urlFromParams = !!rawURL;
+    if (!rawURL) {
+      // Nothing in the settings: what an earlier setup page left for this profile.
+      rawURL = String((cookieJar.get() || {}).url || "").trim();
+    }
+    if (!rawURL) {
+      if (p.exit === true || p.exit === "true") {
+        // A node has no one to ask: it needs the link its setup gave it.
+        setState("dead", "у ноды нет ссылки на доску: настройте ноду заново");
+        return;
+      }
+      running = true;
+      setState("connecting");
+      startWizard({});
       return;
     }
-    name = "guest_" + randHex(6);
-    running = true;
-    setState("connecting");
-
-    authorize().then(
-      function () { connectOnce(); },
-      function (e) { setState("dead", String(e)); }
-    );
+    launch();
   },
 
   write: function (bytes) {
@@ -600,13 +830,29 @@ var Transport = {
     pendingWaiters = [];
     if (sock) { try { sock.close(); } catch (e) {} }
     sock = null;
+    if (wizardServer) {
+      try { wizardServer.close(); } catch (e) {}
+      wizardServer = null;
+    }
   },
 
+  // cookiesApplied: either the setup page's answer (a board link in the jar) or real yandex cookies the app captured.
+  // A link given in the settings outranks the page's. A new link moves the transport; otherwise the socket is dropped
+  // so the next connection carries the fresh cookies.
   onEvent: function (kind) {
-    if (kind === "cookiesApplied") {
-      // The generic ApplyCookies wrote the jar; drop the socket so the next
-      // connection carries them. onclose then reconnects (once).
+    if (kind !== "cookiesApplied" || !running) return;
+    var link = String((cookieJar.get() || {}).url || "").trim();
+    if (link && !urlFromParams && link !== rawURL) {
+      connectGen++;
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      stopHeartbeats();
+      pendingWaiters = [];
       if (sock) { try { sock.close(); } catch (e) {} }
+      sock = null;
+      rawURL = link;
+      launch();
+      return;
     }
+    if (sock) { try { sock.close(); } catch (e) {} }
   },
 };
