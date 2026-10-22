@@ -10,6 +10,10 @@ var PING_INTERVAL_MS = 5000;
 var READ_TIMEOUT_MS = 90000;
 var MAX_RECONNECT_ATTEMPTS = 999999;
 
+var wizard = require("../../lib/wizard.js");
+var wizardServer = null;
+var urlFromParams = false;
+
 var boardURL = "";
 var running = false;
 var sock = null;
@@ -53,28 +57,9 @@ function decodeJWT(token) {
   return JSON.parse(json);
 }
 
-// Authorization: fetch board page and extract token
-async function authorize(boardURL) {
-  var res = await http.fetch({
-    url: boardURL,
-    method: "GET",
-    headers: {
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9",
-      "User-Agent": UA,
-      "Sec-Fetch-Dest": "document",
-      "Sec-Fetch-Mode": "navigate",
-      "Sec-Fetch-Site": "none",
-      "Sec-GPC": "1"
-    }
-  });
-
-  if (res.status !== 200) {
-    throw new Error("board request: HTTP " + res.status);
-  }
-
-  var html = res.body;
-
+// parseBoardPage pulls the board's token and app host out of the board page's HTML. Pure (sets no globals), so the
+// setup check and the transport both read the page the same way.
+function parseBoardPage(html) {
   // Extract token with regex
   var tokenMatch = html.match(/token:\s*['"]([^'"]+)['"]/);
   if (!tokenMatch) throw new Error("token not found in HTML");
@@ -96,13 +81,42 @@ async function authorize(boardURL) {
   var parsedApp = url.parse(appURL);
   if (parsedApp.host) wsHost = parsedApp.host;
 
+  return { token: token, payload: payload, appURL: appURL, wsHost: wsHost };
+}
+
+// buildWsURL is the flipchart WebSocket address, token in the query. Shared by the transport and the check.
+function buildWsURL(info) {
+  return "wss://" + info.wsHost + "/api/v1/flip/ws?token=" + encodeURIComponent(info.token);
+}
+
+// Authorization: fetch board page and extract token
+async function authorize(boardURL) {
+  var res = await http.fetch({
+    url: boardURL,
+    method: "GET",
+    headers: {
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+      "User-Agent": UA,
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "none",
+      "Sec-GPC": "1"
+    }
+  });
+
+  if (res.status !== 200) {
+    throw new Error("board request: HTTP " + res.status);
+  }
+
+  var parsed = parseBoardPage(res.body);
   return {
-    token: token,
-    payload: payload,
-    appURL: appURL,
-    wsHost: wsHost,
+    token: parsed.token,
+    payload: parsed.payload,
+    appURL: parsed.appURL,
+    wsHost: parsed.wsHost,
     tabID: generateUUID(),
-    myUserID: payload.user_id || ""
+    myUserID: parsed.payload.user_id || ""
   };
 }
 
@@ -145,7 +159,7 @@ async function connectToBoard(attempt) {
       info = await authorize(boardURL);
     }
 
-    var wsURL = "wss://" + info.wsHost + "/api/v1/flip/ws?token=" + encodeURIComponent(info.token);
+    var wsURL = buildWsURL(info);
 
     sock = await ws.open(wsURL, {
       "Origin": info.appURL,
@@ -273,12 +287,164 @@ function onClose(reason) {
   }
 }
 
+// ---- setup wizard ----
+//
+// Transport.setup (an app runs it while a node is being made) and open() without a link serve the wizard page on a
+// loopback port and ask the app to show it. The page checks the board here (/api/check) and hands back {client, node}
+// through window.openfluxSubmit; the answer for this side returns as cookiesApplied.
+
+var WIZARD_LABELS = {
+  link: "Ссылка",
+  page: "Страница доски",
+  token: "Токен доски",
+  socket: "Соединение с сервером"
+};
+
+var WIZARD_CFG = {
+  service: "Bitrix24",
+  title: "Подключение через Bitrix24",
+  tagline: "Мастер настройки туннеля через доску-флипчарт",
+  link: {
+    title: "Шаг 1: Доска",
+    desc: "Клиент и нода зайдут на одну доску-флипчарт Bitrix24.",
+    label: "Ссылка на доску",
+    placeholder: "https://…bitrix24.ru/…",
+    check: "Проверить доску",
+    checking: "Проверяю доску…",
+    found: "Доска найдена",
+    summary: "Доска",
+    howTitle: "Где взять ссылку и что нужно знать",
+    how: [
+      "В Bitrix24 создайте доску-флипчарт и включите для неё общий доступ по ссылке.",
+      "Скопируйте адрес открытой доски из адресной строки.",
+      "Одна доска держит одну пару «клиент и нода». Для второй пары нужна вторая доска.",
+      "Проверка заходит на доску так же, как туннель, и тут же уходит: на доске ничего не остаётся."
+    ]
+  },
+  create: {
+    tab: "Создать на сайте",
+    have: "Есть ссылка",
+    desc: "Откроется Bitrix24: войдите, создайте доску-флипчарт, включите доступ по ссылке и откройте её. Когда доска откроется, нажмите «Это она».",
+    button: "Открыть Bitrix24",
+    waiting: "Создайте доску и откройте её в окне…",
+    url: "https://www.bitrix24.ru/",
+    title: "Bitrix24",
+    match: "^https://[^/]+\\.bitrix24\\.ru/.*(board|flip)",
+    hint: "Откройте доску-флипчарт и нажмите «Это она»"
+  },
+  mode: {
+    title: "Шаг 2: Режим",
+    desc: "Как клиент и нода будут связываться через доску.",
+    onlyClient: "Нода уже работает на этой доске: настроить только клиента",
+    note: "На одной доске работает одна пара. Вторую ноду на ту же доску не ставьте: пакеты смешаются."
+  },
+  options: []
+};
+
+// checkBoard walks the board the way the transport does (the page, the token, one socket) and leaves again: it keeps
+// nothing of the transport's own state, so it can run next to a live one. It reuses the transport's own pure builders
+// (parseBoardPage, decodeJWT, buildWsURL) so a green check means the transport's own path is open.
+async function checkBoard(raw, rep) {
+  var link = String(raw || "").trim();
+  if (!/^https:\/\/[^\/\s]+\//i.test(link)) {
+    throw new wizard.StepError("link", "not an https address of a page");
+  }
+  rep("link", true, wizard.hostName(link));
+
+  var page = await wizard.send("page", {
+    url: link,
+    method: "GET",
+    headers: {
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+      "User-Agent": UA,
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "none",
+      "Sec-GPC": "1"
+    }
+  });
+  if (page.status !== 200) {
+    throw new wizard.StepError("page", "board page HTTP " + page.status, page.status);
+  }
+  rep("page", true, "HTTP 200");
+
+  var binfo;
+  try {
+    binfo = parseBoardPage(page.body);
+  } catch (e) {
+    throw new wizard.StepError("token", wizard.errText(e));
+  }
+  var exp = binfo.payload && binfo.payload.exp;
+  if (exp && Number(exp) * 1000 < Date.now()) {
+    throw new wizard.StepError("token", "the board token has expired");
+  }
+  rep("token", true, "board token ok");
+
+  var s = await wizard.openSocket("socket", buildWsURL(binfo), {
+    "Origin": binfo.appURL,
+    "Sec-GPC": "1",
+    "Cache-Control": "no-cache",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Pragma": "no-cache",
+    "User-Agent": UA
+  }, { readTimeoutMs: 20000 });
+  var answered = false;
+  try {
+    s.send(JSON.stringify({ type: "Ping", id: generateUUID(), tabId: generateUUID() }));
+    var msg = await s.wait(function () { return true; }, 12000);
+    answered = msg !== null;
+  } finally {
+    s.close();
+  }
+  rep("socket", true, binfo.wsHost + (answered ? " · ответил" : ""));
+  return {
+    title: WIZARD_CFG.link.found,
+    lines: [
+      "Сервер: " + binfo.wsHost,
+      answered ? "Сервер ответил на соединение" : "Соединение открыто (сервер пока молчит — это не всегда ошибка)"
+    ],
+    url: link
+  };
+}
+
+// explainFailure says in words what a failed step means for the board; "" leaves the kit's plain "refused at this step".
+function explainFailure(e) {
+  var st = e.status ? " (" + e.status + ")" : "";
+  if (e.step === "link") return "Нужна ссылка на доску Bitrix24";
+  if (e.step === "page") return "Страница доски не открывается" + st + ": доски нет или она закрыта";
+  if (e.step === "token") return "На странице нет рабочего токена доски: ссылка устарела или это не доска-флипчарт Bitrix24";
+  if (e.step === "socket") return "Не удалось подключиться к серверу доски Bitrix24" + st + ": проверьте, что доска открыта и доступна по ссылке";
+  return "";
+}
+
+function startWizard(values) {
+  if (wizardServer) return;
+  wizardServer = wizard.serve({
+    explain: explainFailure,
+    tag: "[BITRIX]",
+    service: "Bitrix24",
+    labels: WIZARD_LABELS,
+    reason: "Подключение через Bitrix24",
+    cfg: WIZARD_CFG,
+    values: { url: String((values && values.url) || "") },
+    check: checkBoard
+  });
+}
+
+// launch connects to the board the settings or the page left.
+function launch() {
+  running = true;
+  info = null;
+  connectToBoard(0);
+}
+
 // Transport interface
 var Transport = {
   info: function() {
     return {
       name: "bitrix",
-      version: "1.0.0",
+      version: "1.1.0",
       cookieDomain: "",
       mtu: 0,
       reliable: false,
@@ -289,15 +455,45 @@ var Transport = {
     };
   },
 
-  open: async function(cfg) {
-    boardURL = cfg.url || cfg.params.url;
+  // setup is the wizard an app runs while a node is being made (before anything connects).
+  setup: function(values) {
+    startWizard(values || {});
+  },
+
+  open: function(cfg) {
+    var p = (cfg && cfg.params) || {};
+    boardURL = p.url || (cfg && cfg.url) || "";
+    urlFromParams = !!boardURL;
     if (!boardURL) {
-      setState("dead", "no board URL provided");
+      // Nothing in the settings: what an earlier setup page left for this profile.
+      boardURL = String((cookieJar.get() || {}).url || "").trim();
+    }
+    if (!boardURL) {
+      if (p.exit === true || p.exit === "true") {
+        // A node has no one to ask: it needs the link its setup gave it.
+        setState("dead", "у ноды нет ссылки на доску: настройте ноду заново");
+        return;
+      }
+      running = true;
+      setState("connecting");
+      startWizard({});
       return;
     }
+    launch();
+  },
 
-    running = true;
-    connectToBoard(0);
+  // cookiesApplied: the setup page's answer for this side. Settings the carrier was given outrank it.
+  onEvent: function(kind) {
+    if (kind !== "cookiesApplied" || !running || urlFromParams) return;
+    var link = String((cookieJar.get() || {}).url || "").trim();
+    if (!link || link === boardURL) return;
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+    if (sock) { try { sock.close(); } catch (e) {} sock = null; }
+    connectedAt = null;
+    reconnectAttempt = 0;
+    boardURL = link;
+    launch();
   },
 
   write: function(bytes) {
@@ -336,6 +532,10 @@ var Transport = {
     if (sock) {
       sock.close();
       sock = null;
+    }
+    if (wizardServer) {
+      try { wizardServer.close(); } catch (e) {}
+      wizardServer = null;
     }
   }
 };
