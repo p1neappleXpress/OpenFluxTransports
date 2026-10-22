@@ -263,6 +263,62 @@ input:focus, textarea:focus { border-color: var(--accent); }
   vertical-align: middle;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+.choices { display: grid; gap: 8px; margin-bottom: 14px; }
+.choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  margin: 0;
+  background: var(--card2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 400;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+.choice input { margin-top: 3px; flex-shrink: 0; }
+.choice.on { border-color: var(--accent); background: var(--accent-dim); }
+.choice b { display: block; font-weight: 600; }
+.choice .sub { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+.seg {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  margin-bottom: 14px;
+  background: var(--card2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.seg button {
+  flex: 1;
+  padding: 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.seg button.on { background: var(--accent); color: #fff; }
+
+.inline { display: flex; gap: 8px; align-items: stretch; }
+.inline input { flex: 1; min-width: 0; }
+.inline .btn { flex: 0 0 auto; padding: 10px 14px; }
+
+.report { margin-top: 12px; }
+.report summary { cursor: pointer; color: var(--accent); font-weight: 500; font-size: 12px; }
+.report .row { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; font-size: 12px; color: var(--text); }
+.report .mark { width: 14px; flex-shrink: 0; text-align: center; font-weight: 700; }
+.report .row.ok .mark { color: var(--ok); }
+.report .row.bad .mark { color: var(--err); }
+.report .note { display: block; color: var(--muted); font-size: 11px; font-family: monospace; word-break: break-word; }
 </style>
 </head>
 <body>
@@ -281,39 +337,96 @@ input:focus, textarea:focus { border-color: var(--accent); }
     <div class="dot active"></div>
     <div class="dot"></div>
     <div class="dot"></div>
+    <div class="dot"></div>
   </div>
 
-  <!-- Step 1: the call -->
+  <!-- Step 1: who joins -->
   <div class="step visible" id="step1">
     <div class="card">
-      <h2>Шаг 1: Звонок</h2>
-      <p class="desc">Клиент и нода зайдут в один звонок VK Teams гостями. Вставьте ссылку на него.</p>
-      <div class="field">
-        <label for="callUrl">Ссылка на звонок</label>
-        <input type="text" id="callUrl" placeholder="https://calls.myteam.mail.ru/join/…" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <h2>Шаг 1: Вход</h2>
+      <p class="desc">Как клиент зайдёт в звонок VK Teams.</p>
+      <div class="choices">
+        <label class="choice on" id="chGuest" for="whoGuest">
+          <input type="radio" name="who" id="whoGuest" value="guest" checked>
+          <div><b>Гостем</b><span class="sub">Без входа, под именем «Гость». Подходит для звонка, куда пускают гостей.</span></div>
+        </label>
+        <label class="choice" id="chAccount" for="whoAccount">
+          <input type="radio" name="who" id="whoAccount" value="account">
+          <div><b>Аккаунтом VK Teams</b><span class="sub">Можно создать звонок прямо здесь и зайти в звонок, закрытый для гостей.</span></div>
+        </label>
       </div>
-      <button class="btn-service" id="checkBtn">Проверить звонок</button>
+      <div id="accountBox" style="display:none">
+        <button class="btn-service" id="loginBtn">Войти в VK Teams</button>
+        <div id="accountStatus" style="margin-top:12px"></div>
+        <div id="accountInfo"></div>
+        <div id="accountReport"></div>
+        <details class="hint-box">
+          <summary>Что делает вход</summary>
+          <ol>
+            <li>Откроется окно VK Teams: войдите так, как обычно. Когда вход пройдёт, окно закроется само.</li>
+            <li>Пароль и коды из SMS мастеру не видны: он получает только вход в аккаунт, как браузер после входа.</li>
+            <li>Этот вход записывается в настройки клиента как секрет. Ноде он нужен, только если звонок закрыт для гостей.</li>
+          </ol>
+        </details>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-primary" id="step1Next">Далее</button>
+    </div>
+  </div>
+
+  <!-- Step 2: the call -->
+  <div class="step" id="step2">
+    <div class="card">
+      <h2>Шаг 2: Звонок</h2>
+      <p class="desc" id="step2Desc"></p>
+      <div class="seg" id="seg" style="display:none">
+        <button type="button" id="segNew">Создать звонок</button>
+        <button type="button" id="segHave" class="on">Есть ссылка</button>
+      </div>
+      <div id="newBox" style="display:none">
+        <label class="check" for="closedCall">
+          <input type="checkbox" id="closedCall">
+          <span>Закрыть для гостей: зайдут только вошедшие в аккаунт</span>
+        </label>
+        <button class="btn-service" id="createBtn">Создать звонок</button>
+        <div id="createStatus" style="margin-top:12px"></div>
+        <div id="createReport"></div>
+      </div>
+      <div id="haveBox">
+        <div class="field">
+          <label for="callUrl">Ссылка на звонок</label>
+          <div class="inline">
+            <input type="text" id="callUrl" placeholder="https://calls.myteam.mail.ru/join/…" autocomplete="off" autocapitalize="off" spellcheck="false">
+            <button type="button" class="btn btn-secondary" id="copyBtn" style="display:none">Копировать</button>
+          </div>
+        </div>
+        <button class="btn-service" id="checkBtn">Проверить звонок</button>
+      </div>
       <div id="checkStatus" style="margin-top:12px"></div>
       <div id="checkInfo"></div>
+      <div id="checkReport"></div>
       <a class="manual-toggle" id="skipCheck" href="#">Продолжить без проверки</a>
       <details class="hint-box">
         <summary>Где взять ссылку и что нужно знать</summary>
         <ol>
           <li>В VK Teams создайте звонок и скопируйте ссылку-приглашение: <code>https://calls.myteam.mail.ru/join/…</code></li>
-          <li>Звонок должен идти, пока работает туннель. Обе стороны сидят в нём гостями под именем «Гость».</li>
+          <li>Звонок должен идти, пока работает туннель. Гость заходит под именем «Гость», аккаунт — под своим.</li>
           <li>Проверка проходит вход в звонок так же, как туннель, и тут же его бросает: к звонку она не подключается.</li>
+          <li id="createHint" style="display:none">Созданный здесь звонок VK может закончить, если в нём долго никого нет: запускайте ноду и клиента сразу после мастера.</li>
         </ol>
       </details>
     </div>
     <div class="actions">
-      <button class="btn btn-primary" id="step1Next" disabled>Далее</button>
+      <button class="btn btn-secondary" id="step2Back">Назад</button>
+      <button class="btn btn-primary" id="step2Next" disabled>Далее</button>
     </div>
   </div>
 
-  <!-- Step 2: the mode -->
-  <div class="step" id="step2">
+  <!-- Step 3: the mode -->
+  <div class="step" id="step3">
     <div class="card">
-      <h2>Шаг 2: Режим</h2>
+      <h2>Шаг 3: Режим</h2>
       <p class="desc">Как клиент и нода будут связываться через звонок.</p>
       <label class="check" for="onlyClient">
         <input type="checkbox" id="onlyClient">
@@ -324,23 +437,30 @@ input:focus, textarea:focus { border-color: var(--accent); }
         <span>Только через TURN-сервер звонка</span>
       </label>
       <div class="help" style="margin:-6px 0 14px 26px">Весь трафик пойдёт через сервер VK: медленнее, но проходит там, где прямое соединение закрыто.</div>
-      <div id="step2Status" style="margin-top:12px"></div>
+      <div id="nodeAccountRow" style="display:none">
+        <label class="check" for="nodeAccount">
+          <input type="checkbox" id="nodeAccount">
+          <span>Нода тоже зайдёт этим аккаунтом</span>
+        </label>
+        <div class="help" style="margin:-6px 0 14px 26px">Нужно, если звонок закрыт для гостей. Вход аккаунта запишется в настройки ноды, и она будет ходить в VK со своего адреса, а не с телефона: это может насторожить VK.</div>
+      </div>
+      <div id="step3Status" style="margin-top:12px"></div>
     </div>
     <div class="actions">
-      <button class="btn btn-secondary" id="step2Back">Назад</button>
-      <button class="btn btn-primary" id="step2Next">Далее</button>
+      <button class="btn btn-secondary" id="step3Back">Назад</button>
+      <button class="btn btn-primary" id="step3Next">Далее</button>
     </div>
   </div>
 
-  <!-- Step 3: summary + submit -->
-  <div class="step" id="step3">
+  <!-- Step 4: summary + submit -->
+  <div class="step" id="step4">
     <div class="card">
-      <h2>Шаг 3: Готово</h2>
+      <h2>Шаг 4: Готово</h2>
       <p class="desc">Всё настроено. Проверьте и подтвердите.</p>
       <div id="summary"></div>
     </div>
     <div class="actions">
-      <button class="btn btn-secondary" id="step3Back">Назад</button>
+      <button class="btn btn-secondary" id="step4Back">Назад</button>
       <button class="btn btn-ok" id="submitBtn">Готово</button>
     </div>
   </div>
@@ -352,7 +472,9 @@ input:focus, textarea:focus { border-color: var(--accent); }
 var INIT = {};
 try { INIT = JSON.parse(document.getElementById("init").textContent || "{}"); } catch (e) {}
 
-var state = { step: 1, url: "", checked: false, call: null };
+// mode is who joins: "guest", or "account" once the sign-in window has given an account the script accepted
+// (account is that sign-in packed for the settings; it is a secret, it only goes into the payload).
+var state = { step: 1, mode: "guest", account: "", who: null, url: "", checked: false, call: null, created: false };
 
 function $(id) { return document.getElementById(id); }
 
@@ -366,14 +488,18 @@ function badge(type, html) {
   return '<span class="badge ' + type + '">' + html + '</span>';
 }
 
+var SPIN = '<span class="spinner"></span> ';
+
 function goStep(n) {
   state.step = n;
-  for (var i = 1; i <= 3; i++) $("step" + i).classList.toggle("visible", i === n);
+  for (var i = 1; i <= 4; i++) $("step" + i).classList.toggle("visible", i === n);
   var dots = document.querySelectorAll(".steps .dot");
   for (var j = 0; j < dots.length; j++) {
     dots[j].className = "dot" + (j < n - 1 ? " done" : j === n - 1 ? " active" : "");
   }
-  if (n === 3) renderSummary();
+  if (n === 2) showCallStep();
+  if (n === 3) showModeStep();
+  if (n === 4) renderSummary();
 }
 
 function api(path, body) {
@@ -384,15 +510,104 @@ function api(path, body) {
   }).then(function (r) { return r.json(); });
 }
 
-// ── Step 1: the call ──
+// What the script did, step by step: a mark, the step and its note (a status or the shape of an answer, never a secret).
+function reportHTML(steps, open) {
+  if (!steps || !steps.length) return "";
+  var h = '<details class="hint-box report"' + (open ? " open" : "") + '><summary>Ход проверки</summary>';
+  for (var i = 0; i < steps.length; i++) {
+    var s = steps[i];
+    h += '<div class="row ' + (s.ok ? "ok" : "bad") + '"><span class="mark">' + (s.ok ? "✓" : "✗") + '</span><span>' +
+      esc(s.label || s.id) + (s.note ? '<span class="note">' + esc(s.note) + '</span>' : "") + '</span></div>';
+  }
+  return h + "</details>";
+}
+
+// ── Step 1: who joins ──
+
+function setMode(mode) {
+  state.mode = mode;
+  $("chGuest").classList.toggle("on", mode === "guest");
+  $("chAccount").classList.toggle("on", mode === "account");
+  $("accountBox").style.display = mode === "account" ? "block" : "none";
+  $("step1Next").disabled = mode === "account" && !state.account;
+  resetCheck();
+}
+
+$("whoGuest").addEventListener("change", function () { setMode("guest"); });
+$("whoAccount").addEventListener("change", function () { setMode("account"); });
+
+function resetAccount() {
+  state.account = "";
+  state.who = null;
+  $("accountInfo").innerHTML = "";
+  $("accountReport").innerHTML = "";
+  $("step1Next").disabled = state.mode === "account";
+  resetCheck();
+}
+
+function loginLabel(again) {
+  $("loginBtn").disabled = false;
+  $("loginBtn").textContent = again ? "Войти другим аккаунтом" : "Войти в VK Teams";
+}
+
+function accountHTML(r) {
+  var name = r.name || (r.email || "").split("@")[0] || "Аккаунт";
+  return '<div class="profile"><div class="avatar">' + esc(name.charAt(0).toUpperCase()) + '</div>' +
+    '<div><div class="name">' + esc(name) + '</div><div class="phone">' + esc(r.email || "") + '</div></div></div>';
+}
+
+function onAccount(r) {
+  if (r && r.ok) {
+    state.account = r.account;
+    state.who = { name: r.name, email: r.email };
+    $("accountStatus").innerHTML = badge("ok", "Вход выполнен");
+    $("accountInfo").innerHTML = accountHTML(r);
+    $("accountReport").innerHTML = reportHTML(r.steps, false);
+    $("step1Next").disabled = false;
+    loginLabel(true);
+  } else {
+    resetAccount();
+    $("accountStatus").innerHTML = badge("err", esc((r && r.error) || "Не удалось войти"));
+    $("accountReport").innerHTML = reportHTML(r && r.steps, true);
+    loginLabel(false);
+  }
+}
+
+$("loginBtn").onclick = function () {
+  if (typeof window.openfluxLogin !== "function") {
+    // Opened outside the app, or in one that cannot show a sign-in window.
+    $("accountStatus").innerHTML = badge("err", "Это приложение не открывает окно входа: вход аккаунтом есть в приложении для Android");
+    return;
+  }
+  resetAccount();
+  $("loginBtn").disabled = true;
+  $("loginBtn").innerHTML = SPIN + "Войдите в VK Teams...";
+  $("accountStatus").innerHTML = badge("wait", "Войдите в аккаунт в открывшемся окне");
+  window.openfluxLogin({
+    url: "https://app.workspace.vk.ru/calls",
+    title: "Вход в VK Teams",
+    capture: { cookies: true, signedIn: { fetch: "/api/v2/userinfo" } }
+  }).then(function (stored) {
+    $("loginBtn").innerHTML = SPIN + "Проверяю вход...";
+    $("accountStatus").innerHTML = badge("wait", SPIN + "Проверяю вход...");
+    return api("account", { capture: stored });
+  }).then(onAccount).catch(function (e) {
+    onAccount({ ok: false, error: (e && e.message) || String(e) });
+  });
+};
+
+$("step1Next").onclick = function () { goStep(2); };
+
+// ── Step 2: the call ──
 
 function resetCheck() {
   state.checked = false;
   state.call = null;
   $("checkStatus").innerHTML = "";
   $("checkInfo").innerHTML = "";
+  $("checkReport").innerHTML = "";
   $("skipCheck").style.display = "none";
-  $("step1Next").disabled = true;
+  $("step2Next").disabled = true;
 }
 
 function callHTML(r) {
@@ -400,69 +615,165 @@ function callHTML(r) {
     '<div class="avatar">V</div>' +
     '<div><div class="name">Звонок найден</div>' +
     '<div class="phone">TURN: ' + (r.turn ? "есть" : "нет") + ' · STUN: ' + (r.stun ? "есть" : "нет") + '</div>' +
-    '<div class="uid">код ' + esc(r.code) + '</div></div></div>';
+    '<div class="uid">код ' + esc(r.code) + (r.as === "account" ? " · проверено аккаунтом" : " · проверено гостем") + '</div></div></div>';
+}
+
+// "Создать звонок" / "Есть ссылка": only an account can create.
+function setSeg(which) {
+  $("segNew").classList.toggle("on", which === "new");
+  $("segHave").classList.toggle("on", which === "have");
+  $("newBox").style.display = which === "new" ? "block" : "none";
+  $("haveBox").style.display = which === "have" ? "block" : "none";
+  $("checkStatus").style.display = which === "have" ? "block" : "none";
+  $("checkInfo").style.display = which === "have" ? "block" : "none";
+  $("checkReport").style.display = which === "have" ? "block" : "none";
+  $("skipCheck").style.pointerEvents = which === "have" ? "auto" : "none";
+}
+
+function showCallStep() {
+  var account = state.mode === "account";
+  $("seg").style.display = account ? "flex" : "none";
+  $("step2Desc").textContent = account
+    ? "Создайте звонок здесь или вставьте ссылку на существующий, в том числе закрытый для гостей."
+    : "Клиент и нода зайдут в один звонок VK Teams гостями. Вставьте ссылку на него.";
+  $("createHint").style.display = account ? "list-item" : "none";
+  if (!account) setSeg("have");
+  else if (!$("callUrl").value.trim() && !state.created) setSeg("new");
+  else setSeg("have");
 }
 
 $("callUrl").value = INIT.url || "";
 $("relay").checked = !!INIT.relay;
-$("callUrl").addEventListener("input", resetCheck);
+$("callUrl").addEventListener("input", function () {
+  state.created = false;
+  $("copyBtn").style.display = "none";
+  resetCheck();
+});
 $("callUrl").addEventListener("keydown", function (e) {
   if (e.key === "Enter") { e.preventDefault(); $("checkBtn").click(); }
 });
+$("segNew").onclick = function () { setSeg("new"); };
+$("segHave").onclick = function () { setSeg("have"); };
 
-$("checkBtn").onclick = function () {
+// The account the script holds is gone (the sign-in ran out): back to step 1 to sign in again.
+function lostAccount(message) {
+  resetAccount();
+  $("accountStatus").innerHTML = badge("err", esc(message || "Вход в аккаунт больше не действует: войдите заново"));
+  loginLabel(false);
+  goStep(1);
+}
+
+function runCheck() {
   var url = $("callUrl").value.trim();
   resetCheck();
   if (!url) { $("checkStatus").innerHTML = badge("err", "Вставьте ссылку на звонок"); return; }
   if (!/^https:\/\//i.test(url)) { $("checkStatus").innerHTML = badge("err", "Ссылка должна начинаться с https://"); return; }
   state.url = url;
   $("checkBtn").disabled = true;
-  $("checkStatus").innerHTML = badge("wait", '<span class="spinner"></span> Проверяю звонок...');
-  api("check", { url: url }).then(function (r) {
+  $("checkStatus").innerHTML = badge("wait", SPIN + "Проверяю звонок...");
+  api("check", { url: url, mode: state.mode }).then(function (r) {
     $("checkBtn").disabled = false;
     if (r.ok) {
       state.checked = true;
       state.call = r;
       $("checkStatus").innerHTML = badge("ok", "Звонок найден");
       $("checkInfo").innerHTML = callHTML(r);
-      $("step1Next").disabled = false;
+      $("checkReport").innerHTML = reportHTML(r.steps, false);
+      $("step2Next").disabled = false;
+    } else if (r.auth && state.mode === "account") {
+      lostAccount(r.error);
     } else {
       $("checkStatus").innerHTML = badge("err", esc(r.error || "Не удалось проверить звонок"));
+      $("checkReport").innerHTML = reportHTML(r.steps, true);
       if (r.network) $("skipCheck").style.display = "block";
     }
   }).catch(function (e) {
     $("checkBtn").disabled = false;
     $("checkStatus").innerHTML = badge("err", esc(String(e)));
   });
-};
+}
+
+$("checkBtn").onclick = runCheck;
 
 $("skipCheck").onclick = function (e) {
   e.preventDefault();
   state.url = $("callUrl").value.trim();
   $("checkStatus").innerHTML = badge("wait", "Звонок не проверен");
-  $("step1Next").disabled = false;
+  $("step2Next").disabled = false;
 };
 
-$("step1Next").onclick = function () { goStep(2); };
+$("createBtn").onclick = function () {
+  $("createBtn").disabled = true;
+  $("createReport").innerHTML = "";
+  $("createStatus").innerHTML = badge("wait", SPIN + "Создаю звонок...");
+  api("create", { closed: $("closedCall").checked }).then(function (r) {
+    $("createBtn").disabled = false;
+    if (r.ok) {
+      $("createStatus").innerHTML = "";
+      $("callUrl").value = r.url;
+      $("copyBtn").style.display = "";
+      state.created = true;
+      setSeg("have");
+      runCheck();
+    } else if (r.auth) {
+      lostAccount(r.error);
+    } else {
+      $("createStatus").innerHTML = badge("err", esc(r.error || "Не удалось создать звонок"));
+      $("createReport").innerHTML = reportHTML(r.steps, true);
+    }
+  }).catch(function (e) {
+    $("createBtn").disabled = false;
+    $("createStatus").innerHTML = badge("err", esc(String(e)));
+  });
+};
 
-// ── Step 2: the mode ──
-
-$("step2Back").onclick = function () { goStep(1); };
-
-$("step2Next").onclick = function () {
-  if ($("relay").checked && state.call && !state.call.turn) {
-    $("step2Status").innerHTML = badge("err", "VK не предложил TURN-сервер этого звонка: в режиме «только TURN» соединение не поднимется");
+$("copyBtn").onclick = function () {
+  var el = $("callUrl");
+  var done = function () { $("copyBtn").textContent = "Скопировано"; setTimeout(function () { $("copyBtn").textContent = "Копировать"; }, 1500); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(el.value).then(done, function () {});
     return;
   }
-  $("step2Status").innerHTML = "";
-  goStep(3);
+  el.select();
+  try { if (document.execCommand("copy")) done(); } catch (e) {}
 };
 
-// ── Step 3: summary + submit ──
+$("step2Back").onclick = function () { goStep(1); };
+$("step2Next").onclick = function () { goStep(3); };
+
+// ── Step 3: the mode ──
+
+function showModeStep() {
+  var account = state.mode === "account" && !!state.account;
+  $("nodeAccountRow").style.display = account && !$("onlyClient").checked ? "block" : "none";
+}
+
+$("onlyClient").addEventListener("change", showModeStep);
+
+$("step3Back").onclick = function () { goStep(2); };
+
+$("step3Next").onclick = function () {
+  if ($("relay").checked && state.call && !state.call.turn) {
+    $("step3Status").innerHTML = badge("err", "VK не предложил TURN-сервер этого звонка: в режиме «только TURN» соединение не поднимется");
+    return;
+  }
+  $("step3Status").innerHTML = "";
+  goStep(4);
+};
+
+// ── Step 4: summary + submit ──
+
+function nodeUsesAccount() {
+  return state.mode === "account" && !!state.account && !$("onlyClient").checked && $("nodeAccount").checked;
+}
 
 function renderSummary() {
-  var rows = [["Звонок", state.call ? ("код " + state.call.code) : "не проверен"]];
-  rows.push(["Нода", $("onlyClient").checked ? "уже работает, настраивается только клиент" : "настраивается этим мастером"]);
+  var who = state.mode === "account"
+    ? "аккаунтом" + (state.who && (state.who.name || state.who.email) ? " " + (state.who.name || state.who.email) : "")
+    : "гостем";
+  var rows = [["Клиент входит", who]];
+  rows.push(["Звонок", state.call ? ("код " + state.call.code) : "не проверен"]);
+  rows.push(["Нода", $("onlyClient").checked ? "уже работает, настраивается только клиент" : (nodeUsesAccount() ? "настраивается этим мастером, входит аккаунтом" : "настраивается этим мастером, входит гостем")]);
   rows.push(["Путь", $("relay").checked ? "только через TURN" : "напрямую, при отказе через TURN"]);
   var html = "";
   for (var i = 0; i < rows.length; i++) {
@@ -477,26 +788,33 @@ function copy(o) {
   return out;
 }
 
-// What each end keeps: the call and the mode are the same for both. The core tells a node it is the node, so
-// there is no exit flag.
+// What each end keeps: the call and the mode are the same for both; the sign-in goes to the client, and to the node
+// only when asked. The core tells a node it is the node, so there is no exit flag.
 function payload() {
   var shared = { url: state.url };
   if ($("relay").checked) shared.relay = "true";
   var client = copy(shared);
+  if (state.mode === "account" && state.account) client.account = state.account;
   if ($("onlyClient").checked) return { client: client };
-  return { client: client, node: copy(shared) };
+  var node = copy(shared);
+  if (nodeUsesAccount()) node.account = state.account;
+  return { client: client, node: node };
 }
 
-$("step3Back").onclick = function () { goStep(2); };
+$("step4Back").onclick = function () { goStep(3); };
 
 $("submitBtn").onclick = function () {
   var data = payload();
   if (window.openfluxSubmit) {
     window.openfluxSubmit(data);
   } else {
+    // Outside the app there is nobody to take it: show what would be handed over, without the sign-in.
+    var shown = JSON.parse(JSON.stringify(data));
+    if (shown.client && shown.client.account) shown.client.account = "…";
+    if (shown.node && shown.node.account) shown.node.account = "…";
     $("summary").innerHTML += '<div class="hint-box" style="margin-top:12px">' +
       '<code>openfluxSubmit</code> не найден — открыто вне приложения.<br>' +
-      'Данные: <pre style="white-space:pre-wrap;font-size:11px;margin-top:4px">' + esc(JSON.stringify(data, null, 2)) + '</pre></div>';
+      'Данные: <pre style="white-space:pre-wrap;font-size:11px;margin-top:4px">' + esc(JSON.stringify(shown, null, 2)) + '</pre></div>';
   }
 };
 </script>
