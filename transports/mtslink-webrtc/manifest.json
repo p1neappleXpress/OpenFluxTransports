@@ -1,0 +1,12 @@
+{
+  "id": "mtslink-webrtc",
+  "name": "mtslink-webrtc",
+  "version": "1.3.0",
+  "author": "OpenFlux",
+  "description": "MTS-Link WebRTC: genuine P2P DataChannel tunnel through MTS-Link meetings with chat fallback.",
+  "wire": 1,
+  "api": 1,
+  "update": [
+    "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/mtslink-webrtc/update.json"
+  ]
+}

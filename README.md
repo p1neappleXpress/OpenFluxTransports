@@ -20,21 +20,36 @@ is the source and the release pipeline; to write a transport of your own, fork
 | `mtslink` | cursor position updates on an MTS-Link whiteboard (by trader52) |
 | `bitrix` | cursor position updates on a Bitrix24 Flipchart whiteboard (by trader52) |
 | `pruffme` | cursor position updates on a PRUFFME whiteboard (no cells left on the board) |
+| `mtslink-webrtc` | a WebRTC data channel between two guests of an MTS-Link meeting, signaling and fallback through the meeting chat (by trader52) |
+| `vkteams` | a WebRTC data channel in a VK Teams call, signaling through the call's custom-data messages; an end joins as a guest or as a signed-in account (by trader52, the account is OpenFlux's) |
 
 ## Layout
 
 ```
 transports/<id>/main.js         the transport (starts a bundle: it may require("../../lib/..."))
 transports/<id>/manifest.json   id, name, version, wire, api, update (signed with the package)
+transports/<id>/setup.html      the setup wizard page, as it is written and previewed in a browser (optional)
+transports/<id>/setup_html.js   the same page as a JS string, which main.js requires (made by scripts/embed-html.sh)
 lib/                            modules shared by several transports (captcha, MAX client)
 index.json                      the catalog the apps show: one entry per transport
 scripts/build.sh                bundle + pack + sign one transport
+scripts/embed-html.sh           setup.html -> setup_html.js
 ```
 
 `name` and `version` in `manifest.json` must equal what the script's own
 `info()` says; `scriptsign pack` refuses a mismatch. `wire` is the generation of
 the transport's wire format: client and node both run a transport, so a new
 `wire` is a breaking change that apps hold back until the user confirms.
+
+## Thanks
+
+The first versions of `mtslink`, `bitrix`, `mtslink-webrtc` and `vkteams` and the work of
+figuring out their protocols are trader52's; the wires of `mtslink-webrtc` and `vkteams` are
+untouched. What OpenFlux added on top of those two: the setup wizards (the page checks the
+meeting or the call and hands the settings to both ends), the settings declared as settings,
+neutral guest names, a log without addresses or candidates, and, in `vkteams`, the sign-in as an
+account (the wizard can then create the call and an end can join a call that is closed to
+guests). Thank you, trader52.
 
 ## Releasing
 
