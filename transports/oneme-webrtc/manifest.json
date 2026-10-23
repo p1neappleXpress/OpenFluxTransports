@@ -1,9 +1,9 @@
 {
   "id": "oneme-webrtc",
   "name": "oneme-webrtc",
-  "version": "1.1.0",
+  "version": "3.8.2",
   "author": "OpenFlux",
-  "description": "MAX (OneMe): packets ride a WebRTC data channel.",
+  "description": "MAX (OneMe): P2P DataChannel via TURN relay, emoji-encrypted MSG_SEND signaling.",
   "wire": 1,
   "api": 1,
   "update": [

@@ -1,0 +1,639 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MAX — настройка подключения</title>
+<style>
+:root {
+  --bg: #0d1117;
+  --card: #161b22;
+  --card2: #1c2129;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #58a6ff;
+  --accent-dim: rgba(88,166,255,0.15);
+  --ok: #3fb950;
+  --ok-dim: rgba(63,185,80,0.15);
+  --err: #f85149;
+  --err-dim: rgba(248,81,73,0.15);
+  --warn: #d29922;
+  --border: #30363d;
+  --radius: 12px;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f6f8fa;
+    --card: #ffffff;
+    --card2: #f0f3f6;
+    --text: #1f2328;
+    --muted: #656d76;
+    --accent: #0969da;
+    --accent-dim: rgba(9,105,218,0.12);
+    --ok: #1a7f37;
+    --ok-dim: rgba(26,127,55,0.12);
+    --err: #cf222e;
+    --err-dim: rgba(207,34,46,0.12);
+    --warn: #9a6700;
+    --border: #d0d7de;
+  }
+}
+* { box-sizing: border-box; margin: 0; }
+body {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.6 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  padding: 16px;
+  display: flex;
+  justify-content: center;
+}
+.wizard {
+  width: 100%;
+  max-width: 480px;
+  padding-top: 24px;
+}
+.logo {
+  text-align: center;
+  margin-bottom: 24px;
+}
+.logo svg { width: 48px; height: 48px; }
+.logo h1 { font-size: 18px; font-weight: 600; margin-top: 8px; }
+.logo p { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+.steps { display: flex; gap: 4px; margin-bottom: 24px; }
+.steps .dot {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  transition: background 0.3s;
+}
+.steps .dot.active { background: var(--accent); }
+.steps .dot.done { background: var(--ok); }
+
+.step { display: none; }
+.step.visible { display: block; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.card h2 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.card p.desc { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+
+label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+input[type="text"], textarea {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--card2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+input:focus, textarea:focus { border-color: var(--accent); }
+textarea { resize: vertical; min-height: 60px; font-family: monospace; font-size: 12px; }
+.field { margin-bottom: 14px; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.badge.ok { background: var(--ok-dim); color: var(--ok); }
+.badge.err { background: var(--err-dim); color: var(--err); }
+.badge.wait { background: var(--accent-dim); color: var(--accent); }
+.badge::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.profile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--card2);
+  border-radius: 8px;
+  margin-top: 12px;
+}
+.profile .name { font-weight: 600; font-size: 14px; }
+.profile .phone { color: var(--muted); font-size: 12px; }
+.profile .uid { color: var(--muted); font-size: 11px; font-family: monospace; }
+
+.avatar {
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  background: var(--accent-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+.btn {
+  flex: 1;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.btn:active { opacity: 0.8; }
+.btn:disabled { opacity: 0.4; cursor: default; }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-secondary { background: var(--card2); color: var(--text); border: 1px solid var(--border); }
+.btn-ok { background: var(--ok); color: #fff; }
+
+.btn-max {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 20px;
+  background: linear-gradient(135deg, #0077ff 0%, #0055cc 100%);
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+  width: 100%;
+}
+.btn-max:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,119,255,0.3); }
+.btn-max:active { transform: translateY(0); }
+.btn-max:disabled { opacity: 0.5; cursor: default; transform: none; box-shadow: none; }
+.btn-max svg { width: 20px; height: 20px; }
+
+.hint-box {
+  background: var(--card2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.hint-box summary { cursor: pointer; color: var(--accent); font-weight: 500; }
+.hint-box ol { padding-left: 16px; margin-top: 8px; }
+.hint-box li { margin-bottom: 4px; }
+.hint-box code {
+  background: var(--bg);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.manual-toggle {
+  display: block;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 12px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.manual-toggle:hover { color: var(--accent); }
+.manual-section { display: none; margin-top: 12px; }
+.manual-section.visible { display: block; }
+
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.summary-row:last-child { border-bottom: none; }
+.summary-row .key { color: var(--muted); }
+.summary-row .val { font-weight: 500; font-family: monospace; font-size: 12px; }
+
+.spinner {
+  display: inline-block;
+  width: 14px; height: 14px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  vertical-align: middle;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="wizard">
+  <div class="logo">
+    <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="24" cy="24" r="22" stroke="var(--accent)" stroke-width="2.5"/>
+      <path d="M24 13 L33 18.5 V29.5 L24 35 L15 29.5 V18.5 Z" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>
+      <circle cx="24" cy="24" r="4" fill="var(--accent)"/>
+    </svg>
+    <h1>Подключение через MAX</h1>
+    <p>Мастер настройки P2P DataChannel</p>
+  </div>
+
+  <div class="steps" id="steps">
+    <div class="dot active"></div>
+    <div class="dot"></div>
+    <div class="dot"></div>
+    <div class="dot"></div>
+  </div>
+
+  <!-- Step 1: Client account -->
+  <div class="step visible" id="step1">
+    <div class="card">
+      <h2>Шаг 1: Аккаунт клиента</h2>
+      <p class="desc">Войдите в аккаунт MAX, который будет инициировать звонок.</p>
+      <button class="btn-max" id="loginClient">
+        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"/><path d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        Войти в MAX
+      </button>
+      <div id="clientStatus" style="margin-top:12px"></div>
+      <div id="clientProfile"></div>
+      <a class="manual-toggle" id="manualToggle1" href="#">Ввести токен вручную</a>
+      <div class="manual-section" id="manualSection1">
+        <div class="field">
+          <label>Токен</label>
+          <textarea id="clientToken" placeholder="An_Sx6HQ9HDi..."></textarea>
+        </div>
+        <button class="btn btn-primary" id="verifyClient" style="width:100%">Проверить</button>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-primary" id="step1Next" disabled>Далее</button>
+    </div>
+  </div>
+
+  <!-- Step 2: Node account -->
+  <div class="step" id="step2">
+    <div class="card">
+      <h2>Шаг 2: Аккаунт ноды</h2>
+      <p class="desc">Войдите во второй аккаунт MAX (на выходной ноде).</p>
+      <button class="btn-max" id="loginNode">
+        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"/><path d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        Войти в MAX
+      </button>
+      <div id="nodeStatus" style="margin-top:12px"></div>
+      <div id="nodeProfile"></div>
+      <a class="manual-toggle" id="manualToggle2" href="#">Ввести токен вручную</a>
+      <div class="manual-section" id="manualSection2">
+        <div class="field">
+          <label>Токен</label>
+          <textarea id="nodeToken" placeholder="An_Sx6HQ9HDi..."></textarea>
+        </div>
+        <button class="btn btn-primary" id="verifyNode" style="width:100%">Проверить</button>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="goStep(1)">Назад</button>
+      <button class="btn btn-primary" id="step2Next" disabled>Далее</button>
+    </div>
+  </div>
+
+  <!-- Step 3: Chat verification -->
+  <div class="step" id="step3">
+    <div class="card">
+      <h2>Шаг 3: Проверка связи</h2>
+      <p class="desc">Проверяем, что оба аккаунта могут обмениваться сообщениями.</p>
+      <div id="chatStatus"></div>
+      <div id="chatInfo"></div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="goStep(CLIENT_ONLY ? 1 : 2)">Назад</button>
+      <button class="btn btn-primary" id="verifyChat">Проверить чат</button>
+    </div>
+  </div>
+
+  <!-- Step 4: Summary + Submit -->
+  <div class="step" id="step4">
+    <div class="card">
+      <h2>Шаг 4: Готово</h2>
+      <p class="desc">Всё настроено. Проверьте и подтвердите.</p>
+      <div id="summary"></div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="goStep(3)">Назад</button>
+      <button class="btn btn-ok" id="submitBtn">Готово</button>
+    </div>
+  </div>
+</div>
+
+<script id="init" type="application/json">{}</script>
+<script>
+// The script fills in the init block: with the node's user id this is a second client of an
+// existing node, which signs only its own account in.
+var INIT = {};
+try { INIT = JSON.parse(document.getElementById("init").textContent || "{}"); } catch (e) {}
+var CLIENT_ONLY = !!INIT.nodeUid;
+
+var state = {
+  step: 1,
+  client: { token: "", uid: 0, name: "", phone: "" },
+  node:   { token: "", uid: 0, name: "", phone: "" },
+  chatId: 0
+};
+
+function $(id) { return document.getElementById(id); }
+
+function goStep(n) {
+  state.step = n;
+  for (var i = 1; i <= 4; i++) {
+    var el = $("step" + i); // a second client has no step 2
+    if (el) el.classList.toggle("visible", i === n);
+  }
+  var dots = document.querySelectorAll(".steps .dot");
+  for (var j = 0; j < dots.length; j++) {
+    dots[j].className = "dot" + (j < n - 1 ? " done" : j === n - 1 ? " active" : "");
+  }
+  if (n === 4) renderSummary();
+}
+
+function badge(type, text) {
+  return '<span class="badge ' + type + '">' + text + '</span>';
+}
+
+function profileHTML(data) {
+  var initial = (data.name || "?")[0].toUpperCase();
+  return '<div class="profile">' +
+    '<div class="avatar">' + initial + '</div>' +
+    '<div><div class="name">' + esc(data.name) + '</div>' +
+    '<div class="phone">' + esc(data.phone) + '</div>' +
+    '<div class="uid">uid ' + data.uid + '</div></div></div>' +
+    (data.uid ? '' : '<div class="hint-box" style="margin-top:8px;font-size:11px">Ответ MAX без профиля: ' + esc(data.shape || "?") + '</div>');
+}
+
+function esc(s) {
+  var d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function api(path, body) {
+  return fetch("/api/" + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  }).then(function(r) { return r.json(); });
+}
+
+// ── Sign-in window ──
+// The app opens MAX's web client on top of this page (window.openfluxLogin),
+// waits for the person to sign in, and answers with what the web client keeps
+// in its localStorage: {"viewerId": ..., "token": "..."}.
+
+var SIGN_IN = {
+  client: { btn: "loginClient", status: "clientStatus", profile: "clientProfile", manual: "manualSection1", title: "Вход в MAX: аккаунт клиента" },
+  node:   { btn: "loginNode",   status: "nodeStatus",   profile: "nodeProfile",   manual: "manualSection2", title: "Вход в MAX: аккаунт ноды" }
+};
+
+function startWebViewAuth(role) {
+  var ui = SIGN_IN[role];
+  var statusEl = $(ui.status);
+  var profileEl = $(ui.profile);
+  var btn = $(ui.btn);
+  profileEl.innerHTML = "";
+
+  if (typeof window.openfluxLogin !== "function") {
+    // Opened outside the app, or in one that cannot show a sign-in window: the token by hand.
+    statusEl.innerHTML = badge("err", "Это приложение не открывает вход в MAX. Введите токен вручную.");
+    $(ui.manual).classList.add("visible");
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Войдите в MAX...';
+  statusEl.innerHTML = badge("wait", "Войдите в аккаунт в открывшемся окне");
+
+  window.openfluxLogin({
+    url: "https://web.max.ru",
+    title: ui.title,
+    capture: { localStorage: "__oneme_auth" }
+  }).then(function(stored) {
+    var auth = null;
+    try { auth = JSON.parse(stored); } catch (e) {}
+    if (!auth || !auth.token) throw new Error("MAX не вернул токен входа");
+    statusEl.innerHTML = badge("wait", '<span class="spinner"></span> Проверяю токен...');
+    return api("verify", { token: auth.token, viewerId: auth.viewerId }).then(function(r) {
+      if (r.ok) r.token = auth.token;
+      handleAuthResult(role, r);
+    });
+  }).catch(function(e) {
+    handleAuthResult(role, { ok: false, error: (e && e.message) || String(e) });
+  });
+}
+
+function handleAuthResult(role, r) {
+  var statusEl = $(role === "client" ? "clientStatus" : "nodeStatus");
+  var profileEl = $(role === "client" ? "clientProfile" : "nodeProfile");
+  var btn = $(role === "client" ? "loginClient" : "loginNode");
+  var nextBtn = $(role === "client" ? "step1Next" : "step2Next");
+
+  btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" width="20" height="20"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"/><path d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> Войти в MAX';
+
+  if (r.ok) {
+    var data = { token: r.token, uid: r.uid, name: r.name, phone: r.phone };
+    if (role === "client") state.client = data;
+    else state.node = data;
+
+    statusEl.innerHTML = badge("ok", "Авторизация успешна");
+    profileEl.innerHTML = profileHTML(r);
+    btn.disabled = false;
+    nextBtn.disabled = false;
+
+    if (role === "node" && state.node.uid === state.client.uid) {
+      statusEl.innerHTML = badge("err", "Нельзя использовать один и тот же аккаунт");
+      nextBtn.disabled = true;
+      return;
+    }
+  } else {
+    statusEl.innerHTML = badge("err", r.error || "Ошибка авторизации");
+    btn.disabled = false;
+  }
+}
+
+// ── WebView login buttons ──
+$("loginClient").onclick = function() { startWebViewAuth("client"); };
+$("loginNode").onclick = function() { startWebViewAuth("node"); };
+
+// ── Next buttons ──
+$("step1Next").onclick = function() { if (state.client.token) goStep(CLIENT_ONLY ? 3 : 2); };
+$("step2Next").onclick = function() { if (state.node.token) goStep(3); };
+
+// ── Manual toggle ──
+$("manualToggle1").onclick = function(e) {
+  e.preventDefault();
+  $("manualSection1").classList.toggle("visible");
+};
+$("manualToggle2").onclick = function(e) {
+  e.preventDefault();
+  $("manualSection2").classList.toggle("visible");
+};
+
+// ── Manual verify (fallback) ──
+$("verifyClient").onclick = function() {
+  var token = $("clientToken").value.trim();
+  if (!token) return;
+  $("clientStatus").innerHTML = badge("wait", '<span class="spinner"></span> Проверка...');
+  $("clientProfile").innerHTML = "";
+  api("verify", { token: token }).then(function(r) {
+    if (r.ok) {
+      state.client = { token: token, uid: r.uid, name: r.name, phone: r.phone };
+      $("clientStatus").innerHTML = badge("ok", "Токен действителен");
+      $("clientProfile").innerHTML = profileHTML(r);
+      $("step1Next").disabled = false;
+    } else {
+      $("clientStatus").innerHTML = badge("err", r.error || "Ошибка");
+    }
+  }).catch(function(e) {
+    $("clientStatus").innerHTML = badge("err", String(e));
+  });
+};
+
+$("verifyNode").onclick = function() {
+  var token = $("nodeToken").value.trim();
+  if (!token) return;
+  $("nodeStatus").innerHTML = badge("wait", '<span class="spinner"></span> Проверка...');
+  $("nodeProfile").innerHTML = "";
+  api("verify", { token: token }).then(function(r) {
+    if (r.ok) {
+      state.node = { token: token, uid: r.uid, name: r.name, phone: r.phone };
+      $("nodeStatus").innerHTML = badge("ok", "Токен действителен");
+      $("nodeProfile").innerHTML = profileHTML(r);
+      if (state.node.uid === state.client.uid) {
+        $("nodeStatus").innerHTML = badge("err", "Нельзя использовать один и тот же аккаунт");
+        return;
+      }
+      $("step2Next").disabled = false;
+    } else {
+      $("nodeStatus").innerHTML = badge("err", r.error || "Ошибка");
+    }
+  }).catch(function(e) {
+    $("nodeStatus").innerHTML = badge("err", String(e));
+  });
+};
+
+$("clientToken").addEventListener("keydown", function(e) {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("verifyClient").click(); }
+});
+$("nodeToken").addEventListener("keydown", function(e) {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("verifyNode").click(); }
+});
+
+// ── Chat verification ──
+$("verifyChat").onclick = function() {
+  $("chatStatus").innerHTML = badge("wait", '<span class="spinner"></span> Проверка чата...');
+  $("chatInfo").innerHTML = "";
+  api("chat", {
+    clientToken: state.client.token,
+    nodeToken: CLIENT_ONLY ? "" : state.node.token,
+    clientUid: state.client.uid,
+    nodeUid: CLIENT_ONLY ? INIT.nodeUid : state.node.uid
+  }).then(function(r) {
+    if (r.ok) {
+      state.chatId = r.chatId;
+      $("chatStatus").innerHTML = badge("ok", "Связь установлена");
+      $("chatInfo").innerHTML =
+        '<div class="profile" style="margin-top:12px">' +
+        '<div><div class="name">chatId: ' + r.chatId + '</div>' +
+        '<div class="phone">' + (r.unconfirmed ? "Сообщение принято сервером" : "Тестовое сообщение доставлено") + '</div></div></div>';
+      setTimeout(function() { goStep(4); }, 600);
+    } else {
+      $("chatStatus").innerHTML = badge("err", r.error || "Не удалось установить связь");
+      $("chatInfo").innerHTML = '<div class="hint-box" style="margin-top:12px">' +
+        'Убедитесь, что оба аккаунта добавлены в контакты друг друга и имеют открытый диалог.</div>';
+    }
+  }).catch(function(e) {
+    $("chatStatus").innerHTML = badge("err", String(e));
+  });
+};
+
+// ── Summary + Submit ──
+function renderSummary() {
+  var rows = [
+    ["Ваш аккаунт", state.client.name + " (" + state.client.phone + ")"],
+    ["uid вашего аккаунта", String(state.client.uid)]
+  ];
+  if (CLIENT_ONLY) {
+    rows.push(["uid ноды", String(INIT.nodeUid)]);
+  } else {
+    rows.push(["Аккаунт ноды", state.node.name + " (" + state.node.phone + ")"]);
+    rows.push(["uid ноды", String(state.node.uid)]);
+  }
+  rows.push(["chatId", String(state.chatId)]);
+  var html = "";
+  for (var i = 0; i < rows.length; i++) {
+    html += '<div class="summary-row"><span class="key">' + rows[i][0] +
+            '</span><span class="val">' + esc(rows[i][1]) + '</span></div>';
+  }
+  $("summary").innerHTML = html;
+}
+
+// What each side keeps. The client side: its account's token, who it calls (the node's user id) and
+// the chat the offer goes through. The node side: its account's token and its own user id (a second
+// device that only signs its own account in learns whom to call from it). The core tells a node it is
+// the node, so no exit flag.
+function payload() {
+  var client = {
+    token: state.client.token,
+    uid: String(CLIENT_ONLY ? INIT.nodeUid : state.node.uid),
+    chatId: String(state.chatId)
+  };
+  return CLIENT_ONLY ? { client: client } : { client: client, node: { token: state.node.token, uid: String(state.node.uid) } };
+}
+
+$("submitBtn").onclick = function() {
+  var data = payload();
+  if (window.openfluxSubmit) {
+    window.openfluxSubmit(data);
+  } else {
+    $("summary").innerHTML += '<div class="hint-box" style="margin-top:12px">' +
+      '<code>openfluxSubmit</code> не найден — открыто вне приложения.<br>' +
+      'Данные: <pre style="white-space:pre-wrap;font-size:11px;margin-top:4px">' +
+      esc(JSON.stringify(data, null, 2).replace(/"token": "[^"]*"/g, '"token": "…"')) + '</pre></div>';
+  }
+};
+
+// ── Client-only mode: no node account to sign in ──
+if (CLIENT_ONLY) {
+  $("step2").remove();
+  $("step1").querySelector(".desc").textContent = "Войдите в свой аккаунт MAX: нода уже настроена, нужен только он.";
+  var dot = document.querySelectorAll(".steps .dot")[1];
+  if (dot) dot.style.display = "none";
+}
+</script>
+</body>
+</html>
