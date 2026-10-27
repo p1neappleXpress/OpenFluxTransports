@@ -18,7 +18,9 @@
 //     superapp, the script gets a messenger session from them the way the superapp does (a silent token, then
 //     withSession), asks for the calls token with that session and goes on as a guest does. That lets the wizard
 //     create a call and lets an end join a call that is closed to guests;
-//   - a failed attempt is tried again until the transport is closed (1.0.0 tried a second time and then stopped).
+//   - a failed attempt is tried again until the transport is closed (1.0.0 tried a second time and then stopped);
+//   - the data channel is unordered and unreliable, paced, and one tunnel packet is one datagram (see "The data
+//     channel's datagrams"). The wire is the same, but the end that creates the channel decides how it behaves.
 
 var BASE_URL = "https://u.myteam.vmailru.net";
 var API_VERSION = "v149";
@@ -32,7 +34,31 @@ var CALL_HOST = "https://calls.myteam.mail.ru";
 var WS_ORIGIN = "https://app.workspace.vk.ru";
 var WS_CLIENT_ID = "9oxgKFbOIviE1bXPWf1YfbgkAxNLRopf";
 var SESSION_API_VERSION = "v145";
-var MESSENGER_HOSTS = [BASE_URL, "https://u.myteam.mail.ru"];
+// The Mail.ru SSO that turns a calls-scoped silent token into the access token the calls API takes, and the calls app
+// those requests claim to come from. A signed-in account creates a call through these; everyone (the account included)
+// then joins the call as a guest.
+var SSO_ORIGIN = "https://corsapi.imgsmail.ru";
+var CALLS_ORIGIN = "https://calls-app.myteam.mail.ru";
+var SSO_RESOURCE = "https://e.mail.ru";
+var MESSENGER_HOSTS = [BASE_URL]; // u.myteam.mail.ru is dead (no DNS); vmailru.net only
+
+// ── The data channel's datagrams ──
+//
+// The tunnel inside needs no help from the channel under it: its packets are IP packets, its TCP orders and
+// retransmits for itself. So the channel is unordered and has no retransmissions (a reliable one stalled a
+// second at every loss, and the TCP inside retransmitted what it had already re-sent). What is left is to keep
+// one tunnel packet in one datagram: a message longer than one SCTP chunk is cut into several datagrams sent
+// back to back, and the relay in front of a mobile network keeps the first of such a burst and drops most of
+// the rest.
+//   SCTP_MTU      the SCTP packet; plus 69 bytes of DTLS, TURN, UDP and IP it is the datagram, 1429 here
+//   a chunk       holds SCTP_MTU - 32 (the common header and an I-DATA header)
+//   CARRIER_MTU   the IP packet the tunnel runs over this channel; the tunnel puts 115 bytes around it
+//                 (78 envelope, 4 batch framing, 33 encryption): 1200 + 115 = 1315 <= 1328
+//   BATCH_BYTES   how much the tunnel may coalesce into one message: a chunk less the 35 bytes of
+//                 encryption and batch header
+var SCTP_MTU = 1360;
+var CARRIER_MTU = 1200;
+var BATCH_BYTES = SCTP_MTU - 32 - 35;
 
 var running = false;
 var isExit = false;
@@ -50,6 +76,8 @@ var wsSeq = 1;
 var pc = null;
 var dc = null;
 var offerTimer = null;
+var reconnTimer = null; // a grace timer for an ICE "disconnected" blip before a full reconnect
+var lastReconnectAt = 0; // when the last forced reconnect fired, to back off if the link is flapping
 var pendingCandidates = [];
 var haveRemoteDesc = false;
 var offerEpoch = 0;
@@ -119,6 +147,48 @@ function resetCallState() {
   }
 }
 
+function clearReconnTimer() {
+  if (reconnTimer) {
+    clearTimeout(reconnTimer);
+    reconnTimer = null;
+  }
+}
+
+// forceReconnect tears the live attempt down and starts a clean one. The peer connection breaking (a Wi-Fi<->LTE jump,
+// say) is not caught by the ws.onclose path on its own: the signalling socket can stay up for a while, so waiting for it
+// would hang, and re-sending the old offer only carries ICE candidates for a network that is gone. A fresh attempt
+// signs in again and gathers candidates for the network the device is on now. A quick flap is backed off to every 5 s.
+function forceReconnect(reason) {
+  clearReconnTimer();
+  if (!running) return;
+  console.log("[VKTEAMS] forcing reconnect: " + reason);
+  setState("reconnecting", reason);
+  stopSocket();        // drop the (maybe still-open) signalling socket; its onclose will not start a second retry
+  resetCallState();    // tear down pc/dc and the offer timer
+  var now = Date.now();
+  var delay = (now - lastReconnectAt < 5000) ? 5000 : 1000;
+  lastReconnectAt = now;
+  retryLater(delay);
+}
+
+// scheduleReconnect waits a moment first, so a brief ICE "disconnected" that recovers on its own is not churned; a
+// return to "connected" clears the timer.
+function scheduleReconnect(reason, ms) {
+  if (!running || reconnTimer) return;
+  reconnTimer = setTimeout(function () {
+    reconnTimer = null;
+    forceReconnect(reason);
+  }, ms);
+}
+
+// exitDropConnection is the node's answer to its peer connection breaking: it cannot dial, so it drops the dead peer and
+// waits for the client's next (fresh) offer, which handleRemoteOffer then rebuilds from.
+function exitDropConnection(reason) {
+  setState("reconnecting", reason);
+  resetCallState();
+  targetPeerId = "";
+}
+
 function sendCustomData(payload) {
   if (!wsConn) return;
   var msg = {
@@ -158,8 +228,8 @@ StepError.prototype.constructor = StepError;
 var STEP_LABELS = {
   guest: "Гостевой вход",
   userinfo: "Вход в аккаунт",
-  silent: "Токен мессенджера",
-  session: "Сессия мессенджера",
+  silent: "Токен звонков",
+  session: "Авторизация звонков",
   calls: "Токен звонков",
   login: "Вход в сервис звонков",
   join: "Вход в звонок",
@@ -355,7 +425,7 @@ function whoName(info) {
   return s.trim().slice(0, 80);
 }
 
-var acctSession = null; // the messenger session of the signed-in account, kept between attempts
+var acctAuth = null; // the signed-in account's calls access token (+ email, name), kept between attempts
 var acctDevice = ""; // its device id: one per run, like a browser's
 
 function accountDevice() {
@@ -385,11 +455,17 @@ function sessionContext(deviceId, ts) {
   };
 }
 
-// accountSession signs the account's cookies in to the messenger the way the superapp does when it opens: "who am I"
-// (is the sign-in alive), a silent token for the messenger, then the messenger's session for that token.
-async function accountSession(acct, rep) {
-  if (acctSession && acctSession.cookie === acct.cookie && acctSession.expiresAt - 60000 > Date.now()) return acctSession;
-  acctSession = null;
+// accountAuth signs the account's cookies in the way the superapp's calls page does: "who am I" (is the sign-in alive,
+// and what is the account's email), a calls-scoped silent token, then the Mail.ru SSO exchange that turns it into the
+// access token calls/create takes. No messenger/WIM session is needed: a signed-in account joins calls as a guest; the
+// account is used only to create them.
+async function accountAuth(acct, rep) {
+  if (acctAuth && acctAuth.cookie === acct.cookie && acctAuth.expiresAt - 60000 > Date.now()) {
+    acct.email = acctAuth.email;
+    if (!acct.name) acct.name = acctAuth.name;
+    return acctAuth;
+  }
+  acctAuth = null;
   var agent = acct.ua || UA;
   var wsHeaders = function (post) {
     var h = {
@@ -407,7 +483,7 @@ async function accountSession(acct, rep) {
     return h;
   };
 
-  // 1. Is the sign-in alive?
+  // 1. Is the sign-in alive? (also gives the account's email, which calls/create needs.)
   var r = await send("userinfo", { url: WS_ORIGIN + "/api/v2/userinfo", headers: wsHeaders(false) });
   var info = parse(r.body);
   if (r.status !== 200 || !info || typeof info.email !== "string") {
@@ -418,12 +494,12 @@ async function accountSession(acct, rep) {
   if (!acct.name) acct.name = whoName(info);
   rep("userinfo", true, "");
 
-  // 2. A silent token for the messenger.
+  // 2. A calls-scoped silent token from the superapp (targetID "calls", not "messenger").
   r = await send("silent", {
     url: WS_ORIGIN + "/api/v1/silent_token",
     method: "POST",
     headers: wsHeaders(true),
-    body: JSON.stringify({ clientID: WS_CLIENT_ID, targetID: "messenger", grantType: "ws_app_silent_token" })
+    body: JSON.stringify({ clientID: WS_CLIENT_ID, targetID: "calls", grantType: "ws_app_silent_token" })
   });
   var st = parse(r.body);
   if (r.status !== 200 || !st || typeof st.silent_token !== "string" || !st.silent_token) {
@@ -431,36 +507,22 @@ async function accountSession(acct, rep) {
   }
   rep("silent", true, "");
 
-  // 3. The messenger's session for it. The host the guest wire uses first, the superapp's own after it.
-  var reqBody = JSON.stringify({ silent_token: st.silent_token, context: sessionContext(accountDevice(), Math.floor(Date.now() / 1000)) });
-  var failure = null;
-  for (var i = 0; i < MESSENGER_HOSTS.length; i++) {
-    var host = MESSENGER_HOSTS[i];
-    var sr;
-    try {
-      sr = await http.fetch({
-        url: host + "/api/" + SESSION_API_VERSION + "/messenger/auth/withSession",
-        method: "POST",
-        headers: { "User-Agent": agent, "Content-Type": "application/json", "Accept": "application/json", "Origin": WS_ORIGIN, "Referer": WS_ORIGIN + "/" },
-        body: reqBody
-      });
-    } catch (e) {
-      failure = new StepError("session", hostName(host) + ": no connection: " + errText(e), 0, false, true);
-      rep("session", false, failure.message);
-      continue;
-    }
-    var sj = parse(sr.body);
-    var data = sj && sj.start_session_response && sj.start_session_response.response && sj.start_session_response.response.data;
-    if (sr.status === 200 && sj && sj.access_token && data && data.aimsid) {
-      var life = typeof sj.expires_in === "number" && sj.expires_in > 0 ? sj.expires_in * 1000 : 15 * 60 * 1000;
-      acctSession = { cookie: acct.cookie, host: host, aimsid: data.aimsid, bearer: sj.access_token, hdr: -1, expiresAt: Date.now() + life };
-      rep("session", true, hostName(host));
-      return acctSession;
-    }
-    failure = new StepError("session", hostName(host) + " answered " + sr.status + " " + shape(sj, 2), sr.status);
-    if (i < MESSENGER_HOSTS.length - 1) rep("session", false, failure.message);
+  // 3. Exchange it at the Mail.ru SSO for the calls access token (the one calls/create takes).
+  var sr = await send("session", {
+    url: SSO_ORIGIN + "/auth/api/v1/silent_auth/sso?silent_token=" + encodeURIComponent(st.silent_token) +
+      "&resource=" + encodeURIComponent(SSO_RESOURCE),
+    headers: { "User-Agent": agent, "Accept": "*/*", "Origin": CALLS_ORIGIN, "Referer": CALLS_ORIGIN + "/" }
+  });
+  var sj = parse(sr.body);
+  var at = sj && sj.body && sj.body.access_token;
+  if (sr.status !== 200 || !sj || sj.status !== 200 || typeof at !== "string" || !at) {
+    throw new StepError("session", "silent_auth answered " + sr.status + " " + (sj ? shape(sj, 2) : "no body"),
+      sr.status, sr.status === 401 || sr.status === 403);
   }
-  throw failure;
+  var life = sj.body && typeof sj.body.expires_in === "number" && sj.body.expires_in > 0 ? sj.body.expires_in * 1000 : 12 * 60 * 60 * 1000;
+  acctAuth = { cookie: acct.cookie, accessToken: at, email: acct.email, name: acct.name, expiresAt: Date.now() + life };
+  rep("session", true, "");
+  return acctAuth;
 }
 
 // sessionHeaders are the two headers a session goes in: set 0 both, set 1 the aimsid only, set 2 the bearer only.
@@ -507,15 +569,8 @@ function apiBaseOf(server) {
   return m ? m[1] : OK_API;
 }
 
-// accountCredentials is the account's way to a calls token: the messenger session, then okcalls/getAuthToken with it.
-async function accountCredentials(acct, rep) {
-  var sess = await accountSession(acct, rep);
-  var res = await rapi("calls", sess, "okcalls/getAuthToken");
-  if (!res.token) throw new StepError("calls", "getAuthToken: no token in the answer " + shape(res, 1), 200);
-  var base = apiBaseOf(res.apiServer);
-  rep("calls", true, base === OK_API ? "" : hostName(base));
-  return { token: res.token, devId: accountDevice(), apiBase: base, anonym: false, sess: sess };
-}
+// (An account no longer gets its own calls token: it creates a call via the SSO — see createCall — then joins as a
+// guest, the same chain guestCredentials runs. The messenger-session helpers above it are kept but unused.)
 
 // ---- joining and creating ----
 
@@ -548,61 +603,46 @@ async function joinCall(link, cred, rep) {
   return conv;
 }
 
-// authenticateAndJoin is a chain from nothing to a join: as acct, or as a guest when acct is null. A session or a
-// token that ran out is renewed once.
+// authenticateAndJoin is a chain from nothing to a join. The calls layer is guest for everyone — a signed-in account
+// joins its own call as a guest too — so joining is always the guest chain; the account matters only for createCall.
+// (acct is accepted for call-site compatibility and is not used here.)
 async function authenticateAndJoin(link, rep, acct) {
   rep = rep || newReport().rep;
-  if (!acct) return joinCall(link, await guestCredentials(link, rep), rep);
-  for (var tries = 0; ; tries++) {
-    try {
-      return await joinCall(link, await accountCredentials(acct, rep), rep);
-    } catch (e) {
-      if (tries > 0 || !(e instanceof StepError) || !e.expired) throw e;
-      acctSession = null;
-      rep("session", false, "сессия устарела, беру новую");
-    }
-  }
+  return joinCall(link, await guestCredentials(link, rep), rep);
 }
 
-// createCall makes a call with a join link as the account: the messenger's own way (the one VK Teams' calls page starts
-// a call by link with), or the calls API's when the call is to be closed to guests or the first way would not take.
+// createCall makes a call as the signed-in account: a calls access token via the SSO (accountAuth), then the Mail.ru
+// calls API's create. It returns the join link code; the other end — and this one — join it as guests. The call this
+// path makes is open to guests, so `closed` is not honoured here (kept for call-site compatibility).
 async function createCall(acct, closed, rep) {
-  var cred;
+  var auth;
   for (var tries = 0; ; tries++) {
     try {
-      cred = await accountCredentials(acct, rep);
+      auth = await accountAuth(acct, rep);
       break;
     } catch (e) {
       if (tries > 0 || !(e instanceof StepError) || !e.expired) throw e;
-      acctSession = null;
+      acctAuth = null;
     }
   }
-  var convId = newDeviceID();
-  if (!closed) {
-    try {
-      var res = await rapi("create", cred.sess, "okcalls/startConversation", { conversationId: convId });
-      var made = extractJoinLink(String(res.joinLink || ""));
-      if (/^[\w-]{4,128}$/.test(made)) {
-        rep("create", true, "messenger");
-        return { code: made };
-      }
-      rep("create", false, "messenger: no joinLink in the answer " + shape(res, 1));
-    } catch (e) {
-      if (!(e instanceof StepError)) throw e;
-      rep("create", false, "messenger: " + errText(e));
-    }
+  var cr = await send("create", {
+    url: SSO_ORIGIN + "/api/v1/calls/create",
+    method: "POST",
+    headers: {
+      "User-Agent": acct.ua || UA,
+      "Accept": "*/*",
+      "Content-Type": "application/json",
+      "Origin": CALLS_ORIGIN,
+      "Referer": CALLS_ORIGIN + "/"
+    },
+    body: JSON.stringify({ access_token: auth.accessToken, email: acct.email })
+  });
+  var cj = parse(cr.body);
+  var code = cj && cj.body && cj.body.call_id;
+  if (cr.status !== 200 || !cj || cj.status !== 200 || typeof code !== "string" || !/^[\w-]{4,128}$/.test(code)) {
+    throw new StepError("create", "calls/create answered " + cr.status + " " + (cj ? shape(cj, 2) : "no body"), cr.status);
   }
-  var sessionKey = await callsLogin(cred, rep);
-  var sp = { conversationId: convId, isVideo: false, protocolVersion: 6, createJoinLink: true };
-  if (closed) sp.requireAuthToJoin = true;
-  var conv = await okApi("create", "vchat.startConversation", sp, sessionKey, cred.apiBase);
-  var code = extractJoinLink(String(conv.join_link || conv.joinLink || ""));
-  if (!code) {
-    var jl = await okApi("create", "vchat.createJoinLink", { conversationId: convId }, sessionKey, cred.apiBase);
-    code = extractJoinLink(String(jl.join_link || jl.joinLink || ""));
-  }
-  if (!/^[\w-]{4,128}$/.test(code)) throw new StepError("create", "no join link in the answer " + shape(conv, 1), 200);
-  rep("create", true, "calls api" + (closed ? ", closed to guests" : ""));
+  rep("create", true, "");
   return { code: code };
 }
 
@@ -623,6 +663,22 @@ function buildIceServers(convData) {
   return iceServers;
 }
 
+// pcOptions is what both ends' PeerConnections are made with: the call's relay, and what the core does about a
+// path that drops in bursts (see tuneConnection in transport/script).
+function pcOptions(convData) {
+  var o = {
+    iceServers: buildIceServers(convData),
+    sctpMtu: SCTP_MTU,        // one packet of the tunnel is one datagram
+    sctpRtoMaxMs: 3000,       // SCTP's retransmission timer backs off to 60 s by default: the channel is dead meanwhile
+    sctpMinCwnd: 524288,      // the TCP inside has its own congestion control; SCTP's would only slow it a second time
+    paceKBps: 3000,           // datagrams leave one by one, not as the dozen SCTP releases on an acknowledgement
+    paceQueue: 64,            // and what waits longer than that is dropped (the signal the TCP inside reacts to)
+    dcBufKB: 512              // as is what the channel itself holds
+  };
+  if (forceRelay) o.iceTransportPolicy = "relay";
+  return o;
+}
+
 function flushPendingCandidates() {
   if (!pc || !haveRemoteDesc) return;
   for (var i = 0; i < pendingCandidates.length; i++) {
@@ -641,10 +697,7 @@ async function initiateClientOffer() {
   myPeerId = "cli-" + Math.floor(Math.random() * 1000000000);
   targetPeerId = "";
 
-  var iceServers = buildIceServers(callConfig);
-  var pcOpts = { iceServers: iceServers };
-  if (forceRelay) pcOpts.iceTransportPolicy = "relay";
-  pc = webrtc.newPeerConnection(pcOpts);
+  pc = webrtc.newPeerConnection(pcOptions(callConfig));
   offerEpoch = Date.now();
   var epoch = offerEpoch;
 
@@ -671,13 +724,17 @@ async function initiateClientOffer() {
   pc.onconnectionstatechange = function (s) {
     console.log("[VKTEAMS] client pc connectionState: " + s);
     if (s === "connected") {
+      clearReconnTimer();
       setState("connected");
     } else if (s === "failed" || s === "closed") {
-      setState("reconnecting", "pc state " + s);
+      forceReconnect("pc " + s);
+    } else if (s === "disconnected") {
+      setState("reconnecting", "pc " + s);
+      scheduleReconnect("pc disconnected", 4000);
     }
   };
 
-  dc = pc.createDataChannel("flux-tunnel", { ordered: true });
+  dc = pc.createDataChannel("flux-tunnel", { ordered: false, maxRetransmits: 0 });
   dc.onopen = function () {
     console.log("[VKTEAMS] client dc opened!");
     setState("connected");
@@ -688,7 +745,7 @@ async function initiateClientOffer() {
   };
   dc.onclose = function () {
     console.log("[VKTEAMS] client dc closed!");
-    setState("reconnecting", "datachannel closed");
+    forceReconnect("datachannel closed");
   };
   dc.onmessage = function (bytes) {
     emit(bytes);
@@ -733,7 +790,11 @@ async function handleRemoteOffer(d, epoch) {
   var fromClientId = d.clientId;
   if (!fromClientId) return;
 
-  if (targetPeerId && targetPeerId !== fromClientId && pc) {
+  // A different client while one is already set. A reconnected client (e.g. after a Wi-Fi<->LTE jump) comes back with a
+  // fresh peer id AND a newer epoch — let it take over. Only a genuinely concurrent second client (epoch not newer) is
+  // turned away, so its offer can't knock the established peer off.
+  if (targetPeerId && targetPeerId !== fromClientId && pc && epoch <= offerEpoch) {
+    console.log("[VKTEAMS] exit ignoring a second client " + fromClientId + " (epoch " + epoch + " <= " + offerEpoch + ")");
     return;
   }
 
@@ -762,10 +823,7 @@ async function handleRemoteOffer(d, epoch) {
   resetCallState();
   offerEpoch = epoch;
 
-  var iceServers = buildIceServers(callConfig);
-  var pcOpts = { iceServers: iceServers };
-  if (forceRelay) pcOpts.iceTransportPolicy = "relay";
-  pc = webrtc.newPeerConnection(pcOpts);
+  pc = webrtc.newPeerConnection(pcOptions(callConfig));
 
   pc.onicecandidate = function (c) {
     if (c) {
@@ -792,7 +850,7 @@ async function handleRemoteOffer(d, epoch) {
     if (s === "connected") {
       setState("connected");
     } else if (s === "failed" || s === "closed") {
-      setState("reconnecting", "pc state " + s);
+      exitDropConnection("pc " + s);
     }
   };
 
@@ -805,7 +863,7 @@ async function handleRemoteOffer(d, epoch) {
     };
     dc.onclose = function () {
       console.log("[VKTEAMS] exit dc closed!");
-      setState("reconnecting", "datachannel closed");
+      exitDropConnection("datachannel closed");
     };
     dc.onmessage = function (bytes) {
       emit(bytes);
@@ -1056,8 +1114,8 @@ function takeAccount(req) {
   if (probe) acct.name = whoName(probe);
   var report = newReport();
   wizardAccount = null;
-  acctSession = null;
-  return accountCredentials(acct, report.rep).then(function () {
+  acctAuth = null;
+  return accountAuth(acct, report.rep).then(function () {
     wizardAccount = acct;
     return jsonResponse({ ok: true, name: acct.name, email: acct.email, account: packAccount(acct), steps: report.steps });
   }).catch(function (e) {
@@ -1177,10 +1235,12 @@ var Transport = {
   info: function () {
     return {
       name: "vkteams",
-      version: "1.2.0",
+      version: "1.3.0",
       mtu: 0,
-      reliable: true,
-      ordered: true,
+      carrierMtu: CARRIER_MTU,
+      batchBytes: BATCH_BYTES,
+      reliable: false,
+      ordered: false,
       // All three are settings, none is the profile's one input: the wizard hands each end its values, and a profile
       // field would be wiped by it. Which end this is the core says itself (cfg.params.exit).
       params: [
