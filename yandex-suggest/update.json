@@ -3,12 +3,12 @@
   "id": "yandex-suggest",
   "channels": {
     "stable": {
-      "version": "0.1.0",
+      "version": "0.1.1",
       "wire": 1,
       "api": 1,
-      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/yandex-suggest-v0.1.0/yandex-suggest-0.1.0.flux",
-      "sha256": "bf83ad13b88712c7cfd1403434058fa71d009b15439197ab6c3d1c22c8ccf119",
-      "notes": "Experimental reachability carrier: Yandex Images suggest slots as a slow store-and-forward channel."
+      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/yandex-suggest-v0.1.1/yandex-suggest-0.1.1.flux",
+      "sha256": "c66db753915d9617da4edd07e65938f3ecbf3927f5e256377cdb3658f199ca94",
+      "notes": "Slot pool accepts ',' as a separator too: a node .conf forbids ';'."
     }
   }
 }

@@ -3,12 +3,12 @@
   "id": "yandex-cbir",
   "channels": {
     "stable": {
-      "version": "0.1.0",
+      "version": "0.1.1",
       "wire": 1,
       "api": 1,
-      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/yandex-cbir-v0.1.0/yandex-cbir-0.1.0.flux",
-      "sha256": "bbc684710fa6ca38b3d0e2130d49f74583857b41a876364cd781d41668414989",
-      "notes": "Experimental reachability carrier: Yandex Images search-by-image storage, cbirIds travel in suggest slots."
+      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/yandex-cbir-v0.1.1/yandex-cbir-0.1.1.flux",
+      "sha256": "235675c67d47e30d93a83ee2a8ad0633bc50c7518ccfc5f16e51ba40f643ad06",
+      "notes": "Slot pool accepts ',' as a separator too: a node .conf forbids ';'."
     }
   }
 }
