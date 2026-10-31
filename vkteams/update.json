@@ -3,12 +3,12 @@
   "id": "vkteams",
   "channels": {
     "stable": {
-      "version": "1.4.0",
+      "version": "1.4.2",
       "wire": 1,
       "api": 1,
-      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/vkteams-v1.4.0/vkteams-1.4.0.flux",
-      "sha256": "ae4aed990c4deaeec6976d40bb76d9e1eafd25c8a36cb88407b81c0956527ebe",
-      "notes": "vkteams 1.4.0: own TURN allocations beside the data channel."
+      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/vkteams-v1.4.2/vkteams-1.4.2.flux",
+      "sha256": "2cf85e6c2f079b1b314f5dced774541c80a05b98144989dafa605d7f8ad45eac",
+      "notes": "TURN over UDP+TCP, and a dead peer retries its own offer (new epoch) up to 6 times before the full re-join."
     }
   }
 }
