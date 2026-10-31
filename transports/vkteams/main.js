@@ -59,6 +59,21 @@ var MESSENGER_HOSTS = [BASE_URL]; // u.myteam.mail.ru is dead (no DNS); vmailru.
 var SCTP_MTU = 1360;
 var CARRIER_MTU = 1200;
 var BATCH_BYTES = SCTP_MTU - 32 - 35;
+// TURN-mode tuning (relay=true). The call's TURN server polices DC traffic, so the ~3 MB/s pacing that works on a
+// srflx P2P path collapses the channel through a relay. These knobs are only read when forceRelay is on; a srflx
+// path keeps the original ones. Overridable from settings for experiments: pace_kbps, pace_queue, dc_buf_kb,
+// sctp_min_cwnd.
+var relayPaceKBps = 200;      // just under VK TURN's measured RTP/alloc policing cap (~260 KB/s)
+var relayPaceQueue = 64;
+var relayDcBufKB = 256;
+var relaySctpMinCwnd = 65536; // modest CWND so SCTP doesn't blast into the policer at start
+
+// Raw relay allocations beside the data channel (rawlane.js): 0 keeps the carrier exactly as it was,
+// n opens n more allocations and stripes the tunnel over them, each with an RTP-shaped datagram.
+// rawPaceKBps is per lane, set under the relay's media-class policing.
+var rawLanesWanted = 0;
+var rawPaceKBps = 200;
+var rawInstance = null;
 
 var running = false;
 var isExit = false;
@@ -124,6 +139,8 @@ function extractJoinLink(url) {
 }
 
 function resetCallState() {
+  // The raw allocations are not part of the PeerConnection: they keep running across a PC reconnect
+  // (a re-offer used to tear them down a second after they were made). close() stops them.
   haveRemoteDesc = false;
   pendingCandidates = [];
   localAnswer = null;
@@ -675,7 +692,15 @@ function pcOptions(convData) {
     paceQueue: 64,            // and what waits longer than that is dropped (the signal the TCP inside reacts to)
     dcBufKB: 512              // as is what the channel itself holds
   };
-  if (forceRelay) o.iceTransportPolicy = "relay";
+  if (forceRelay) {
+    o.iceTransportPolicy = "relay";
+    // VK TURN polices the DC: default 3 MB/s pacing collapses the channel through a relay (first run through TURN
+    // delivered <5 KB/s). These lower numbers keep the stream under the policer and let bytes actually arrive.
+    o.sctpMinCwnd = relaySctpMinCwnd;
+    o.paceKBps = relayPaceKBps;
+    o.paceQueue = relayPaceQueue;
+    o.dcBufKB = relayDcBufKB;
+  }
   return o;
 }
 
@@ -935,6 +960,8 @@ function handleCustomData(d) {
   var from = d.from;
   var epoch = d.epoch || 0;
   console.log("[VKTEAMS] handleCustomData: typ=" + typ + " from=" + from + " isExit=" + isExit);
+  // The raw lanes trade relayed addresses over the same bus, and neither end's role filter applies.
+  if (rawInstance && rawInstance.handle(d)) return;
 
   if (isExit) {
     if (from !== "client") return;
@@ -1004,11 +1031,28 @@ async function connectWebSocket(endpoint) {
   };
 }
 
+// startRawLanes opens the extra allocations once the call is joined: each announces its relayed
+// address on the custom-data bus, and a lane becomes live when the peer's address arrives.
+function startRawLanes(cfg) {
+  if (rawInstance || rawLanesWanted < 1 || !cfg) return;
+  rawInstance = rawlane.create({
+    turn: turn,
+    lanes: rawLanesWanted,
+    paceKBps: rawPaceKBps,
+    isExit: isExit,
+    sendCustom: sendCustomData,
+    emit: function (b) { emit(b); },
+    log: function (l) { console.log(l); }
+  });
+  rawInstance.start(cfg);
+}
+
 async function connectOnce() {
   console.log("[VKTEAMS] connectOnce: authenticateAndJoin starting...");
   callConfig = await authenticateAndJoin(joinLink, newReport().rep, account);
   console.log("[VKTEAMS] connectOnce: authenticateAndJoin success!");
   await connectWebSocket(callConfig.endpoint);
+  startRawLanes(callConfig);
 
   if (!isExit) {
     setTimeout(function () {
@@ -1029,6 +1073,8 @@ async function connectOnce() {
 // {client, node} through window.openfluxSubmit; the answer for this side returns as cookiesApplied.
 
 var SETUP_HTML = require("./setup_html.js");
+var turn = require("./turn.js");
+var rawlane = require("./rawlane.js");
 var wizardServer = null;
 
 function jsonResponse(obj) {
@@ -1175,6 +1221,14 @@ function readSettings(p, link) {
   accountText = String(p.account || "");
   account = parseAccount(accountText);
   if (accountText && !account) console.log("[VKTEAMS] the account setting is damaged: joining as a guest");
+  // Optional experiment knobs for TURN-mode pacing (ignored on srflx). A missing / blank value keeps the default.
+  var n;
+  if ((n = parseInt(p.pace_kbps, 10)) > 0) relayPaceKBps = n;
+  if ((n = parseInt(p.pace_queue, 10)) > 0) relayPaceQueue = n;
+  if ((n = parseInt(p.dc_buf_kb, 10)) > 0) relayDcBufKB = n;
+  if ((n = parseInt(p.sctp_min_cwnd, 10)) > 0) relaySctpMinCwnd = n;
+  if ((n = parseInt(p.raw_lanes, 10)) >= 0) rawLanesWanted = n;
+  if ((n = parseInt(p.raw_pace_kbps, 10)) > 0) rawPaceKBps = n;
   return joinLink;
 }
 
@@ -1235,7 +1289,7 @@ var Transport = {
   info: function () {
     return {
       name: "vkteams",
-      version: "1.3.0",
+      version: "1.4.0",
       mtu: 0,
       carrierMtu: CARRIER_MTU,
       batchBytes: BATCH_BYTES,
@@ -1250,7 +1304,11 @@ var Transport = {
         { key: "relay", label: "Только через TURN", type: "boolean", scope: "settings", advanced: true, default: "false",
           description: "Весь трафик пойдёт через сервер VK: медленнее, но проходит там, где прямой путь закрыт." },
         { key: "account", label: "Вход аккаунтом VK Teams", type: "secret", scope: "settings", advanced: true,
-          description: "Его записывает мастер после входа. Пусто: в звонок заходят гостем." }
+          description: "Его записывает мастер после входа. Пусто: в звонок заходят гостем." },
+        { key: "raw_lanes", label: "Свои TURN-аллокации", type: "number", scope: "settings", advanced: true, default: "0",
+          description: "Сколько дополнительных аллокаций открыть рядом с каналом: каждая несёт туннель как RTP-медиа и живёт по своим ~260 КБ/с. 0 — только канал." },
+        { key: "raw_pace_kbps", label: "Темп на аллокацию, КБ/с", type: "number", scope: "settings", advanced: true, default: "200",
+          description: "Сколько отправлять в каждую свою аллокацию. Релей режет медиа-класс около 260 КБ/с." }
       ]
     };
   },
@@ -1301,6 +1359,7 @@ var Transport = {
   },
 
   write: function (bytes) {
+    if (rawInstance && rawInstance.write(bytes)) return;
     if (!dc) {
       throw new Error("data channel not ready");
     }
@@ -1320,6 +1379,10 @@ var Transport = {
       wizardServer = null;
     }
     wizardAccount = null;
+    if (rawInstance) {
+      rawInstance.stop();
+      rawInstance = null;
+    }
     resetCallState();
     stopSocket();
   }
