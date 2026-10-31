@@ -3,12 +3,12 @@
   "id": "yandex-cbir",
   "channels": {
     "stable": {
-      "version": "0.1.1",
+      "version": "0.1.2",
       "wire": 1,
       "api": 1,
-      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/yandex-cbir-v0.1.1/yandex-cbir-0.1.1.flux",
-      "sha256": "235675c67d47e30d93a83ee2a8ad0633bc50c7518ccfc5f16e51ba40f643ad06",
-      "notes": "Slot pool accepts ',' as a separator too: a node .conf forbids ';'."
+      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/yandex-cbir-v0.1.2/yandex-cbir-0.1.2.flux",
+      "sha256": "03a78fae110ab6bfba25c93e319fb28b83611dcff40a4bf6ea006783d7d4b9c2",
+      "notes": "Slot pool is a settings param now: a node .conf cannot carry '|' in the URL field."
     }
   }
 }
