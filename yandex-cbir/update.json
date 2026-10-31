@@ -3,12 +3,12 @@
   "id": "yandex-cbir",
   "channels": {
     "stable": {
-      "version": "0.1.2",
+      "version": "0.1.3",
       "wire": 1,
       "api": 1,
-      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/yandex-cbir-v0.1.2/yandex-cbir-0.1.2.flux",
-      "sha256": "03a78fae110ab6bfba25c93e319fb28b83611dcff40a4bf6ea006783d7d4b9c2",
-      "notes": "Slot pool is a settings param now: a node .conf cannot carry '|' in the URL field."
+      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/yandex-cbir-v0.1.3/yandex-cbir-0.1.3.flux",
+      "sha256": "86f13a5d6404483be14062206771312dd58a45d7fe707cdbb92e23fd65ebd860",
+      "notes": "The search step must be a GET: a HEAD no longer commits the pointer into the personal history."
     }
   }
 }
