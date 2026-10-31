@@ -1,7 +1,7 @@
 {
   "id": "vkteams",
   "name": "vkteams",
-  "version": "1.4.0",
+  "version": "1.4.2",
   "author": "OpenFlux",
   "description": "VK Teams Calls: packets ride a WebRTC data channel (or their own TURN allocations as RTP media) over a call room.",
   "wire": 1,

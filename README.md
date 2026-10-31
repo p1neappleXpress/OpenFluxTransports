@@ -22,6 +22,7 @@ is the source and the release pipeline; to write a transport of your own, fork
 | `pruffme` | cursor position updates on a PRUFFME whiteboard (no cells left on the board) |
 | `mtslink-webrtc` | a WebRTC data channel between two guests of an MTS-Link meeting, signaling and fallback through the meeting chat (by trader52) |
 | `vkteams` | a WebRTC data channel in a VK Teams call, signaling through the call's custom-data messages; an end joins as a guest or as a signed-in account (by trader52, the account is OpenFlux's) |
+| `yandex-caldav` | events in a private Yandex Calendar (CalDAV), acknowledged frame by frame; the exit creates the calendar |
 
 ## Layout
 

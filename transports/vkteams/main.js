@@ -71,6 +71,10 @@ var relaySctpMinCwnd = 65536; // modest CWND so SCTP doesn't blast into the poli
 // Raw relay allocations beside the data channel (rawlane.js): 0 keeps the carrier exactly as it was,
 // n opens n more allocations and stripes the tunnel over them, each with an RTP-shaped datagram.
 // rawPaceKBps is per lane, set under the relay's media-class policing.
+// turnTransports is how the relay is reached: "udp+tcp" (both allocations, ICE picks what the
+// network allows), or one of them. A node whose network drops UDP still gathers a relay candidate
+// over TCP — with UDP alone it gathers nothing and ICE fails 30 s later with nothing to connect to.
+var turnTransports = "udp+tcp";
 var rawLanesWanted = 0;
 var rawPaceKBps = 200;
 var rawInstance = null;
@@ -136,6 +140,48 @@ function extractJoinLink(url) {
     return parts[parts.length - 1];
   }
   return u;
+}
+
+// A dead peer connection is retried on its own, without dropping the call: a fresh offer with a new
+// epoch every few seconds, up to PEER_TRIES times, then the old full re-join. The two ends both
+// rebuild (the exit does it on every new offer), so one retry fixes a transient gather or ICE loss.
+var PEER_TRIES = 6;
+var peerTries = 0;
+var peerTimer = null;
+var peerWatchdog = null;
+
+function clearPeerTimers() {
+  if (peerTimer) { clearTimeout(peerTimer); peerTimer = null; }
+  if (peerWatchdog) { clearTimeout(peerWatchdog); peerWatchdog = null; }
+}
+
+function retryPeer(reason) {
+  if (!running || !callConfig) return;
+  if (dc && dc.readyState === "open") return;
+  clearPeerTimers();
+  peerTries++;
+  if (peerTries > PEER_TRIES) {
+    console.log("[VKTEAMS] peer gave up after " + PEER_TRIES + " tries: " + reason);
+    peerTries = 0;
+    forceReconnect(reason);
+    return;
+  }
+  var wait = Math.min(2000 * peerTries, 10000);
+  console.log("[VKTEAMS] peer retry " + peerTries + "/" + PEER_TRIES + " in " + wait + "ms: " + reason);
+  setState("reconnecting", reason);
+  try { if (dc) { dc.onclose = null; dc.close(); } } catch (e) {}
+  dc = null;
+  try { if (pc) { pc.close(); } } catch (e) {}
+  pc = null;
+  resetCallState();
+  peerTimer = setTimeout(function () {
+    peerTimer = null;
+    if (!running || !callConfig) return;
+    if (isExit) return; // the exit answers offers; the client drives the retry
+    initiateClientOffer().catch(function (e) {
+      console.log("[VKTEAMS] retry offer error: " + String(e));
+    });
+  }, wait);
 }
 
 function resetCallState() {
@@ -663,11 +709,37 @@ async function createCall(acct, closed, rep) {
   return { code: code };
 }
 
+function turnUrls(urls) {
+  // One allocation per transport: the relayed address is UDP either way (TURN/TCP only carries our
+  // leg to the relay over TCP), so a TCP allocation pairs with the peer's UDP candidates and covers
+  // a network that drops UDP to :19302. Only the scheme and the transport are logged, never a host.
+  var wantUdp = turnTransports.indexOf("udp") >= 0;
+  var wantTcp = turnTransports.indexOf("tcp") >= 0;
+  var out = [], seen = {};
+  function add(u) { if (u && !seen[u]) { seen[u] = true; out.push(u); } }
+  for (var i = 0; i < (urls || []).length; i++) {
+    var u = String(urls[i]);
+    var base = u.split("?")[0];
+    if (base.indexOf("turns:") === 0) { add(u); continue; } // TLS TURN is TCP by definition
+    if (base.indexOf("turn:") !== 0) { add(u); continue; }
+    if (wantUdp) add(base + "?transport=udp");
+    if (wantTcp) add(base + "?transport=tcp");
+  }
+  return out;
+}
+
 function buildIceServers(convData) {
   var iceServers = [];
   if (convData.turn_server && convData.turn_server.urls && convData.turn_server.urls.length > 0) {
+    var urls = turnUrls(convData.turn_server.urls);
+    var kinds = [];
+    for (var i = 0; i < urls.length; i++) {
+      var k = urls[i].indexOf("transport=tcp") > 0 ? "tcp" : "udp";
+      if (kinds.indexOf(k) < 0) kinds.push(k);
+    }
+    console.log("[VKTEAMS] turn: " + urls.length + " url(s), transports=" + kinds.join(","));
     iceServers.push({
-      urls: convData.turn_server.urls,
+      urls: urls,
       username: convData.turn_server.username,
       credential: convData.turn_server.credential
     });
@@ -704,6 +776,17 @@ function pcOptions(convData) {
   return o;
 }
 
+// noteCandidate counts what ICE found, by type only: a node that gathers no relay candidate has a
+// network problem (UDP to the relay), not a signalling one, and that is what the log then says.
+var candidatesSeen = {};
+function noteCandidate(role, text) {
+  var m = /typ (host|srflx|prflx|relay)/.exec(String(text || ""));
+  var kind = m ? m[1] : "other";
+  var key = role + ":" + kind;
+  candidatesSeen[key] = (candidatesSeen[key] || 0) + 1;
+  if (candidatesSeen[key] === 1) console.log("[VKTEAMS] " + role + " ice candidate: " + kind);
+}
+
 function flushPendingCandidates() {
   if (!pc || !haveRemoteDesc) return;
   for (var i = 0; i < pendingCandidates.length; i++) {
@@ -728,6 +811,7 @@ async function initiateClientOffer() {
 
   pc.onicecandidate = function (c) {
     if (c) {
+      noteCandidate("client", c.candidate);
       if (forceRelay && c.candidate && c.candidate.indexOf("typ relay") === -1) {
         return;
       }
@@ -752,7 +836,7 @@ async function initiateClientOffer() {
       clearReconnTimer();
       setState("connected");
     } else if (s === "failed" || s === "closed") {
-      forceReconnect("pc " + s);
+      retryPeer("pc " + s);
     } else if (s === "disconnected") {
       setState("reconnecting", "pc " + s);
       scheduleReconnect("pc disconnected", 4000);
@@ -762,6 +846,8 @@ async function initiateClientOffer() {
   dc = pc.createDataChannel("flux-tunnel", { ordered: false, maxRetransmits: 0 });
   dc.onopen = function () {
     console.log("[VKTEAMS] client dc opened!");
+    peerTries = 0;
+    clearPeerTimers();
     setState("connected");
     if (offerTimer) {
       clearInterval(offerTimer);
@@ -775,6 +861,14 @@ async function initiateClientOffer() {
   dc.onmessage = function (bytes) {
     emit(bytes);
   };
+
+  clearPeerTimers();
+  peerWatchdog = setTimeout(function () {
+    peerWatchdog = null;
+    if (!running) return;
+    if (dc && dc.readyState === "open") return;
+    retryPeer("no channel in " + Math.round(25000 / 1000) + "s");
+  }, 25000);
 
   var offer = await pc.createOffer();
   await pc.setLocalDescription("offer", offer);
@@ -852,6 +946,7 @@ async function handleRemoteOffer(d, epoch) {
 
   pc.onicecandidate = function (c) {
     if (c) {
+      noteCandidate("exit", c.candidate);
       if (forceRelay && c.candidate && c.candidate.indexOf("typ relay") === -1) {
         return;
       }
@@ -884,6 +979,8 @@ async function handleRemoteOffer(d, epoch) {
     dc = remoteDC;
     dc.onopen = function () {
       console.log("[VKTEAMS] exit dc opened!");
+      peerTries = 0;
+      clearPeerTimers();
       setState("connected");
     };
     dc.onclose = function () {
@@ -1227,6 +1324,10 @@ function readSettings(p, link) {
   if ((n = parseInt(p.pace_queue, 10)) > 0) relayPaceQueue = n;
   if ((n = parseInt(p.dc_buf_kb, 10)) > 0) relayDcBufKB = n;
   if ((n = parseInt(p.sctp_min_cwnd, 10)) > 0) relaySctpMinCwnd = n;
+  if (p.turn_transports === "udp" || p.turn_transports === "tcp" || p.turn_transports === "udp+tcp") {
+    turnTransports = p.turn_transports;
+  }
+  if (p.turn_tcp === "true" || p.turn_tcp === true) turnTransports = "tcp"; // 1.4.1's knob, kept
   if ((n = parseInt(p.raw_lanes, 10)) >= 0) rawLanesWanted = n;
   if ((n = parseInt(p.raw_pace_kbps, 10)) > 0) rawPaceKBps = n;
   return joinLink;
@@ -1289,7 +1390,7 @@ var Transport = {
   info: function () {
     return {
       name: "vkteams",
-      version: "1.4.0",
+      version: "1.4.2",
       mtu: 0,
       carrierMtu: CARRIER_MTU,
       batchBytes: BATCH_BYTES,
@@ -1305,6 +1406,9 @@ var Transport = {
           description: "Весь трафик пойдёт через сервер VK: медленнее, но проходит там, где прямой путь закрыт." },
         { key: "account", label: "Вход аккаунтом VK Teams", type: "secret", scope: "settings", advanced: true,
           description: "Его записывает мастер после входа. Пусто: в звонок заходят гостем." },
+        { key: "turn_transports", label: "Транспорт TURN", type: "select", scope: "settings", advanced: true, default: "udp+tcp",
+          choices: ["udp+tcp", "udp", "tcp"],
+          description: "Как идти до релея. udp+tcp по умолчанию: ICE соберёт кандидата по обоим и возьмёт тот, который проходит. «tcp» — для сети, которая режет UDP на :19302." },
         { key: "raw_lanes", label: "Свои TURN-аллокации", type: "number", scope: "settings", advanced: true, default: "0",
           description: "Сколько дополнительных аллокаций открыть рядом с каналом: каждая несёт туннель как RTP-медиа и живёт по своим ~260 КБ/с. 0 — только канал." },
         { key: "raw_pace_kbps", label: "Темп на аллокацию, КБ/с", type: "number", scope: "settings", advanced: true, default: "200",
