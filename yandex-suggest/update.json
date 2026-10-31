@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "id": "yandex-suggest",
+  "channels": {
+    "stable": {
+      "version": "0.1.0",
+      "wire": 1,
+      "api": 1,
+      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/yandex-suggest-v0.1.0/yandex-suggest-0.1.0.flux",
+      "sha256": "bf83ad13b88712c7cfd1403434058fa71d009b15439197ab6c3d1c22c8ccf119",
+      "notes": "Experimental reachability carrier: Yandex Images suggest slots as a slow store-and-forward channel."
+    }
+  }
+}

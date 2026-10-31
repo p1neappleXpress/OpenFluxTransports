@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "id": "yandex-cbir",
+  "channels": {
+    "stable": {
+      "version": "0.1.0",
+      "wire": 1,
+      "api": 1,
+      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/yandex-cbir-v0.1.0/yandex-cbir-0.1.0.flux",
+      "sha256": "bbc684710fa6ca38b3d0e2130d49f74583857b41a876364cd781d41668414989",
+      "notes": "Experimental reachability carrier: Yandex Images search-by-image storage, cbirIds travel in suggest slots."
+    }
+  }
+}

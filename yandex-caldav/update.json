@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "id": "yandex-caldav",
+  "channels": {
+    "stable": {
+      "version": "0.3.0",
+      "wire": 1,
+      "api": 1,
+      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/yandex-caldav-v0.3.0/yandex-caldav-0.3.0.flux",
+      "sha256": "f139eb2b5d1c9b6c29029d1ae3e0a0dcefdea1e160d6a98ddeaa9c5d8f43d683",
+      "notes": "Yandex Calendar (CalDAV): packets ride events in a private calendar on caldav.yandex.ru."
+    }
+  }
+}
