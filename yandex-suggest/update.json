@@ -3,12 +3,12 @@
   "id": "yandex-suggest",
   "channels": {
     "stable": {
-      "version": "0.1.3",
+      "version": "0.1.4",
       "wire": 1,
       "api": 1,
-      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/yandex-suggest-v0.1.3/yandex-suggest-0.1.3.flux",
-      "sha256": "45c6da7fb37a158185d2e93c02a9491ba0291ed9597cf13d0800977198be7616",
-      "notes": "The search step must be a GET: a HEAD no longer commits the pointer into the personal history."
+      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/yandex-suggest-v0.1.4/yandex-suggest-0.1.4.flux",
+      "sha256": "888ce840cb9d87b12c42f52d4e49114f9e0b96568088380910de3e4f3d88b2bd",
+      "notes": "Slot requests carry the i/yandexuid cookies explicitly; write/read steps log HTTP status."
     }
   }
 }
