@@ -1,0 +1,12 @@
+{
+  "id": "yandex-caldav",
+  "name": "yandex-caldav",
+  "version": "0.3.0",
+  "author": "OpenFlux",
+  "description": "Yandex Calendar (CalDAV): packets ride events in a private calendar on caldav.yandex.ru.",
+  "wire": 1,
+  "api": 1,
+  "update": [
+    "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/yandex-caldav/update.json"
+  ]
+}

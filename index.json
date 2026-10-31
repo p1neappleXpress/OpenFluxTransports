@@ -72,6 +72,12 @@
       "name": "vkteams",
       "description": "VK Teams Calls: packets ride a WebRTC data channel over VK Teams call room.",
       "update": "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/vkteams/update.json"
+    },
+    {
+      "id": "yandex-caldav",
+      "name": "yandex-caldav",
+      "description": "Yandex Calendar (CalDAV): packets ride events in a private calendar on caldav.yandex.ru.",
+      "update": "https://raw.githubusercontent.com/p1neappleXpress/OpenFluxTransports/updates/yandex-caldav/update.json"
     }
   ]
 }
