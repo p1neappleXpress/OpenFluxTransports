@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "id": "vkteams",
+  "channels": {
+    "stable": {
+      "version": "1.4.0",
+      "wire": 1,
+      "api": 1,
+      "url": "https://github.com/p1neappleXpress/OpenFluxTransports/releases/download/vkteams-v1.4.0/vkteams-1.4.0.flux",
+      "sha256": "ae4aed990c4deaeec6976d40bb76d9e1eafd25c8a36cb88407b81c0956527ebe",
+      "notes": "vkteams 1.4.0: own TURN allocations beside the data channel."
+    }
+  }
+}
